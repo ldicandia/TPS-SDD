@@ -1,8 +1,9 @@
 # gcsgrep — spec
 
 > Estado: revisada. Esta especificación define el contrato de la v1 y no deja
-> preguntas abiertas. La implementación se divide en iteraciones en
-> [`gcsgrep-plan.md`](./gcsgrep-plan.md).
+> preguntas abiertas. Fue construida a partir de
+> [`gcsgrep-base-context.md`](./gcsgrep-base-context.md). La implementación se
+> divide en iteraciones en [`gcsgrep-plan.md`](./gcsgrep-plan.md).
 
 ## Propósito
 

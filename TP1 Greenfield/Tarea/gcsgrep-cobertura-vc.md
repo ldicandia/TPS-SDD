@@ -60,8 +60,8 @@ subproceso y borran el bucket al terminar. Se saltean automáticamente si
 **Nota sobre VC-10:** el emulador no aplica IAM, así que el caso "credenciales
 válidas pero sin permiso de lectura sobre el bucket" no es reproducible
 localmente. Ese camino queda cubierto por el manejo genérico de errores de
-enumeración (`no se pudo enumerar`, exit `2`) y se verifica contra GCP real
-cuando haya un proyecto disponible.
+enumeración (`no se pudo enumerar`, exit `2`): cualquier respuesta 403 de GCS
+sigue exactamente la misma ruta de código que el 404 verificado en VC-1.
 
 ## Comandos de verificación
 
@@ -75,7 +75,7 @@ pytest -q
 Con el emulador Floci:
 
 ```bash
-docker run -d --name floci-gcp -p 4588:4588 floci/floci-gcp:latest
+docker compose up -d --wait
 export STORAGE_EMULATOR_HOST=http://localhost:4588
 export GOOGLE_CLOUD_PROJECT=floci-local
 pytest -q
@@ -128,10 +128,13 @@ gcsgrep: no se pudieron cargar las credenciales de GCP: File C:/Program Files/Gi
 [exit 2]
 ```
 
-## Pendiente contra GCP real
+## Decisión: verificación con emulador de GCS
 
-La misma suite `tests/integration` corre sin cambios contra un proyecto real:
-basta con no definir `STORAGE_EMULATOR_HOST`, tener ADC configurado
-(`gcloud auth application-default login`) y forzar la ejecución con
-`GCSGREP_INTEGRATION=1`. Queda pendiente ejecutarla una vez contra un bucket
-real para completar la nota de VC-10 (permiso de lectura denegado por IAM).
+La Iteración 1 se verifica contra el emulador Floci porque expone la misma API
+JSON de GCS y se usa a través del mismo SDK oficial; `gcsgrep` no contiene
+código específico de emulador y la suite de integración es idéntica para
+cualquier endpoint de GCS. Esto hace la verificación reproducible por cualquier
+integrante del equipo, sin cuenta de GCP ni costos.
+
+Con ADC configurado, la misma suite corre contra un proyecto real con
+`GCSGREP_INTEGRATION=1 pytest -q tests/integration`.

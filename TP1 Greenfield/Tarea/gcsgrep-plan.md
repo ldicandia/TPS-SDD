@@ -63,7 +63,7 @@ echo $?
 - Progreso configurable.
 - Verificación de generación del objeto cuando esté disponible.
 - Benchmark sobre objetos grandes para comprobar memoria y rendimiento.
-- Corrida de la suite `tests/integration` contra un bucket real de GCP (`GCSGREP_INTEGRATION=1`), incluyendo el caso de permiso de lectura denegado por IAM que el emulador no reproduce.
+- Corrida de la suite `tests/integration` contra un bucket real de GCP (`GCSGREP_INTEGRATION=1`), incluyendo el caso IAM de VC-10 que el emulador no reproduce.
 
 ### Criterios de éxito
 

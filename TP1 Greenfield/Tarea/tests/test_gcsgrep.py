@@ -158,6 +158,7 @@ def test_cli_returns_two_for_invalid_location():
 
     assert code == 2
     assert "gs://" in stderr.getvalue()
+    assert "Traceback" not in stderr.getvalue()
 
 
 def test_cli_returns_two_when_object_limit_is_reached():

@@ -8,8 +8,8 @@
 
 | Iteración | Entrega | VCs principales |
 |---|---|---|
-| 1 | Búsqueda literal secuencial sobre texto UTF-8 | VC-1 a VC-12 y el contrato básico de scripting |
-| 2 | Robustez operativa y escalabilidad controlada | VC-8, VC-13, VC-14, VC-15 y VC-16 |
+| 1 | Búsqueda literal secuencial sobre texto UTF-8 | VC-1 a VC-12 y VC-16 (verificados contra el emulador Floci) |
+| 2 | Robustez operativa y escalabilidad controlada | VC-13, VC-14 y VC-15; VC-8 con progreso configurable |
 | 3 | Funcionalidades de grep diferidas | Regex, JSON, filtros y conteos; fuera de la entrega mínima |
 
 ## Iteración 1 — Búsqueda literal de punta a punta
@@ -63,7 +63,7 @@ echo $?
 - Progreso configurable.
 - Verificación de generación del objeto cuando esté disponible.
 - Benchmark sobre objetos grandes para comprobar memoria y rendimiento.
-- Pruebas de integración contra un bucket de prueba real.
+- Corrida de la suite `tests/integration` contra un bucket real de GCP (`GCSGREP_INTEGRATION=1`), incluyendo el caso de permiso de lectura denegado por IAM que el emulador no reproduce.
 
 ### Criterios de éxito
 

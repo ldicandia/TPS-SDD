@@ -1,0 +1,18 @@
+# Emulador de Google Cloud Storage (Floci) para la verificación de integración.
+#
+#   docker compose up -d --wait   # levanta el emulador y espera a que esté healthy
+#   docker compose down           # lo detiene y descarta el estado (es en memoria)
+#
+# Luego, con el venv activo:
+#   export STORAGE_EMULATOR_HOST=http://localhost:4588
+#   export GOOGLE_CLOUD_PROJECT=floci-local
+#   pytest -q
+#
+# Los tests crean y borran su propio bucket; no hace falta sembrar nada a mano.
+services:
+  floci-gcp:
+    image: floci/floci-gcp:latest
+    container_name: floci-gcp
+    ports:
+      - "4588:4588"
+    restart: unless-stopped

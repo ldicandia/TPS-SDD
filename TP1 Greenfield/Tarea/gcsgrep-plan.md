@@ -38,14 +38,14 @@
 
 ### Criterios de éxito
 
-- [ ] La búsqueda encuentra coincidencias y muestra el objeto.
-- [ ] `-n` muestra el número correcto de línea.
-- [ ] `-i` ignora mayúsculas y minúsculas.
-- [ ] Una búsqueda sin matches devuelve `1`.
-- [ ] Los errores de objetos se informan y permiten continuar.
-- [ ] Los límites detienen el escaneo con código `2`.
-- [ ] No se realizan operaciones de escritura en GCS.
-- [ ] Los tests unitarios y de CLI pasan.
+- [x] La búsqueda encuentra coincidencias y muestra el objeto.
+- [x] `-n` muestra el número correcto de línea.
+- [x] `-i` ignora mayúsculas y minúsculas.
+- [x] Una búsqueda sin matches devuelve `1`.
+- [x] Los errores de objetos se informan y permiten continuar.
+- [x] Los límites detienen el escaneo con código `2`.
+- [x] No se realizan operaciones de escritura en GCS.
+- [x] Los tests unitarios y de CLI pasan (10 unitarios + 15 de integración contra el emulador Floci; ver `gcsgrep-cobertura-vc.md`).
 
 ### Demostración
 

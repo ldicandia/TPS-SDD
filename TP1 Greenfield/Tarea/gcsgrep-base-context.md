@@ -230,7 +230,10 @@ cli: stdout/stderr y exit code
 
 La dependencia de GCS se inyecta en los tests para verificar la lógica sin
 credenciales reales. Además, la entrega requiere una verificación de integración
-contra un bucket de prueba.
+contra un bucket de prueba. Para que esa verificación sea reproducible y sin
+costo se usa el emulador de GCS de [Floci](https://floci.io/gcp/): el cliente
+oficial lo detecta mediante `STORAGE_EMULATOR_HOST`, por lo que `gcsgrep` no
+necesita código específico de emulador y la misma suite sirve contra GCP real.
 
 ## 6. Riesgos y decisiones aceptadas
 

@@ -1,0 +1,94 @@
+# gcsgrep — plan de iteraciones
+
+> Plan construido a partir de [`gcsgrep-spec.md`](./gcsgrep-spec.md). Cada
+> iteración termina con código ejecutable y sus VCs pasando antes de ampliar el
+> alcance.
+
+## Orden
+
+| Iteración | Entrega | VCs principales |
+|---|---|---|
+| 1 | Búsqueda literal secuencial sobre texto UTF-8 | VC-1 a VC-12 y el contrato básico de scripting |
+| 2 | Robustez operativa y escalabilidad controlada | VC-8, VC-13, VC-14, VC-15 y VC-16 |
+| 3 | Funcionalidades de grep diferidas | Regex, JSON, filtros y conteos; fuera de la entrega mínima |
+
+## Iteración 1 — Búsqueda literal de punta a punta
+
+### Alcance
+
+- CLI `gcsgrep PATTERN gs://bucket/prefijo`.
+- Validación estricta del URI `gs://`.
+- Application Default Credentials mediante el cliente oficial de GCS.
+- Enumeración secuencial de objetos.
+- Lectura incremental por streaming.
+- Búsqueda literal UTF-8.
+- Flags `-i` y `-n`.
+- Salida `objeto:línea:contenido`.
+- Salteo de `.gz` y objetos con byte NUL inicial.
+- Límites predeterminados de 1.000 objetos y 1 GiB.
+- Exit codes `0`, `1` y `2`.
+- Errores de un objeto informados sin abortar el resto.
+
+### Fuera de alcance
+
+- Concurrencia configurable.
+- Regex.
+- JSON, colores, `-l`, `-c` y `--include`.
+- Reintentos avanzados y medición de memoria de objetos grandes.
+
+### Criterios de éxito
+
+- [ ] La búsqueda encuentra coincidencias y muestra el objeto.
+- [ ] `-n` muestra el número correcto de línea.
+- [ ] `-i` ignora mayúsculas y minúsculas.
+- [ ] Una búsqueda sin matches devuelve `1`.
+- [ ] Los errores de objetos se informan y permiten continuar.
+- [ ] Los límites detienen el escaneo con código `2`.
+- [ ] No se realizan operaciones de escritura en GCS.
+- [ ] Los tests unitarios y de CLI pasan.
+
+### Demostración
+
+```bash
+gcsgrep -i -n "timeout" gs://logs/app/
+echo $?
+```
+
+## Iteración 2 — Robustez y escalabilidad
+
+### Alcance
+
+- Reintentos explícitos y configurables para fallos transitorios.
+- Lectura concurrente con `--jobs`, manteniendo límites globales.
+- Progreso configurable.
+- Verificación de generación del objeto cuando esté disponible.
+- Benchmark sobre objetos grandes para comprobar memoria y rendimiento.
+- Pruebas de integración contra un bucket de prueba real.
+
+### Criterios de éxito
+
+- [ ] Los reintentos cumplen NFR-2.
+- [ ] La concurrencia no supera los límites de objetos o bytes.
+- [ ] El progreso sigue yendo a `stderr`.
+- [ ] Todos los VCs de la Iteración 1 siguen pasando.
+
+## Iteración 3 — Alcance diferido
+
+Estas funcionalidades se documentan para evitar que aparezcan accidentalmente
+durante la Iteración 1:
+
+- `-E` para expresiones regulares.
+- `-l` para imprimir solamente nombres de objetos.
+- `-c` para contar coincidencias.
+- `--include` para filtrar nombres de objetos.
+- `--json` para consumidores de máquina.
+- Descompresión de `.gz` al vuelo.
+- Colores y otras opciones visuales.
+
+## Riesgos aceptados
+
+- No existe una snapshot global del bucket.
+- Un bucket grande puede cambiar mientras se ejecuta el listado.
+- La primera versión procesa objetos secuencialmente.
+- Los metadatos de tipo de contenido no se consideran suficientes para detectar
+  binarios.

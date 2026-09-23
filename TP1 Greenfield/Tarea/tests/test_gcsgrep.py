@@ -161,6 +161,24 @@ def test_cli_returns_two_for_invalid_location():
     assert "Traceback" not in stderr.getvalue()
 
 
+def test_cli_validates_location_before_loading_credentials():
+    def failing_factory():
+        raise AssertionError("client must not be created for an invalid location")
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    code = main(
+        ["timeout", "bucket/logs"],
+        client_factory=failing_factory,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert code == 2
+    assert "gs://" in stderr.getvalue()
+
+
 def test_cli_returns_two_when_object_limit_is_reached():
     client = FakeClient(
         [FakeBlob("one.log", b"timeout\n"), FakeBlob("two.log", b"timeout\n")]

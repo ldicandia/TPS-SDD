@@ -6,7 +6,7 @@ import argparse
 import sys
 from typing import TextIO
 
-from .gcs import CostLimitReached, GcsGrepError, create_storage_client, scan
+from .gcs import CostLimitReached, GcsGrepError, create_storage_client, parse_gs_uri, scan
 
 
 def _positive_int(value: str) -> int:
@@ -56,6 +56,8 @@ def main(
     args = parser.parse_args(argv)
 
     try:
+        # Validate the location before touching credentials so a typo reports the URI error.
+        parse_gs_uri(args.location)
         client = client_factory()
 
         def emit_match(name: str, line_number: int, text: str) -> None:

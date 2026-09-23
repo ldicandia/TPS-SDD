@@ -21,7 +21,7 @@
 
 | Elemento | Valor |
 |---|---|
-| Fecha | 2026-09-21 |
+| Fecha | 2026-09-21 (reverificado 2026-09-23 en Windows y WSL) |
 | SO | Windows 11 Pro 10.0.26200 |
 | Python | 3.11.9 |
 | `google-cloud-storage` | 3.14.1 |
@@ -40,7 +40,7 @@ subproceso y borran el bucket al terminar. Se saltean automáticamente si
 
 | VC | Requerimiento | Ejercitado por | Se observa | Estado |
 |---|---|---|---|---|
-| VC-1 | FR-1 URI válida/inválida | `test_gcsgrep.py::test_parse_gs_uri*`; `test_emulator.py::test_vc1_*` | `logs/app/` → exit `2`, stderr `la ubicación debe comenzar con gs://`; bucket inexistente → exit `2`, `no se pudo enumerar`; stdout vacío en ambos | ✅ |
+| VC-1 | FR-1 URI válida/inválida | `test_gcsgrep.py::test_parse_gs_uri*`, `test_gcsgrep.py::test_cli_validates_location_before_loading_credentials`; `test_emulator.py::test_vc1_*` | `logs/app/` → exit `2`, stderr `la ubicación debe comenzar con gs://` (se valida antes de cargar credenciales); bucket inexistente → exit `2`, `no se pudo enumerar`; stdout vacío en ambos | ✅ |
 | VC-2 | FR-2 prefijo | `test_gcsgrep.py::test_scan_finds_literal_matches_and_line_numbers`; `test_emulator.py::test_vc2_*` | Con `gs://B/app/` solo aparece `app/server.log`; `other/notes.txt` (fuera del prefijo) no se visita; con `gs://B/` sí aparece | ✅ |
 | VC-3 | FR-3 streaming | `test_gcsgrep.py::test_scan_finds_literal_matches_and_line_numbers`; `test_emulator.py::test_vc4_*` | El scanner consume un `BlobReader` del cliente oficial en chunks de 64 KiB; no se escribe ningún archivo local | ✅ |
 | VC-4 | FR-4 objeto y línea | `test_gcsgrep.py::test_cli_formats_match_and_returns_zero`; `test_emulator.py::test_vc4_*` | `-n` → `gs://B/app/server.log:4:connection timeout after 30s`; sin `-n` → `gs://B/app/server.log:connection timeout after 30s` | ✅ |
@@ -69,7 +69,7 @@ Sin infraestructura (tests unitarios; los de integración se saltean):
 
 ```bash
 pytest -q
-# 10 passed, 15 skipped
+# 11 passed, 15 skipped
 ```
 
 Con el emulador Floci:
@@ -79,7 +79,7 @@ docker compose up -d --wait
 export STORAGE_EMULATOR_HOST=http://localhost:4588
 export GOOGLE_CLOUD_PROJECT=floci-local
 pytest -q
-# 25 passed in 12.63s
+# 26 passed in 12.23s (Windows) · 26 passed in 2.97s (WSL, Ubuntu 24.04)
 ```
 
 ## Corrida manual documentada

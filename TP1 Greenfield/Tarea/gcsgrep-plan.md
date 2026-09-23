@@ -45,7 +45,7 @@
 - [x] Los errores de objetos se informan y permiten continuar.
 - [x] Los límites detienen el escaneo con código `2`.
 - [x] No se realizan operaciones de escritura en GCS.
-- [x] Los tests unitarios y de CLI pasan (10 unitarios + 15 de integración contra el emulador Floci; ver `gcsgrep-cobertura-vc.md`).
+- [x] Los tests unitarios y de CLI pasan (11 unitarios + 15 de integración contra el emulador Floci; ver `gcsgrep-cobertura-vc.md`).
 
 ### Demostración
 

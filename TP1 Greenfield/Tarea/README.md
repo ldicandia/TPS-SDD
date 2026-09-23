@@ -5,13 +5,24 @@ sin descargarlos previamente a disco.
 
 ## Instalación
 
-Se requiere Python 3.10 o superior:
+Se requiere Python 3.10 o superior. En Linux, macOS o WSL:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e . pytest
 ```
+
+En Windows (PowerShell), donde el intérprete suele invocarse con `py`:
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e . pytest
+```
+
+Si PowerShell bloquea el script de activación, habilitarlo para la sesión con
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`.
 
 La autenticación usa Application Default Credentials:
 
@@ -70,7 +81,7 @@ Docker; el `docker-compose.yml` del proyecto lo levanta:
 docker compose up -d --wait
 export STORAGE_EMULATOR_HOST=http://localhost:4588
 export GOOGLE_CLOUD_PROJECT=floci-local
-pytest -q          # 25 passed
+pytest -q          # 26 passed
 docker compose down
 ```
 

@@ -5,63 +5,96 @@
 > tests de integración que ejecutan el CLI real contra la API de GCS servida por
 > el emulador [Floci](https://floci.io/gcp/). Ninguno de los dos requiere
 > credenciales reales ni genera costos.
+>
+> Corresponde a la spec v1.1 (corrección posterior a la revisión externa
+> `correccion-de-specs v1.1`). Los IDs de VC siguen esa versión: la parte de URI
+> inválido del antiguo VC-1 pasó a VC-21, el bucket inexistente a VC-22 y el
+> formato con `-n` del antiguo VC-4 a VC-19.
 
 ## Resumen
 
 | | |
 |---:|---:|
-| Requerimientos en la spec | 16 |
-| VCs definidos | 16 |
-| VCs con cobertura ejecutable | 13 (VC-1 a VC-12 y VC-16) |
-| VCs pasando | 13 |
-| VCs diferidos a Iteración 2 | 3 (VC-13, VC-14, VC-15) |
+| Requerimientos en la spec | 25 (16 FR, 5 BR, 4 NFR) |
+| VCs definidos | 28 |
+| VCs con cobertura ejecutable | 24 (VC-1 a VC-12, VC-16 a VC-27) |
+| VCs pasando | 24 |
+| VCs diferidos a Iteración 2 | 4 (VC-13, VC-14, VC-15, VC-28) |
 | Requerimientos sin VC | 0 |
 
 ## Entorno de verificación
 
 | Elemento | Valor |
 |---|---|
-| Fecha | 2026-09-21 (reverificado 2026-09-23 en Windows y WSL) |
+| Fecha | 2026-09-25 |
 | SO | Windows 11 Pro 10.0.26200 |
 | Python | 3.11.9 |
 | `google-cloud-storage` | 3.14.1 |
 | Emulador | `floci/floci-gcp:latest` (floci-gcp 0.9.0), Docker 29.2.1 |
 | Endpoint | `STORAGE_EMULATOR_HOST=http://localhost:4588`, `GOOGLE_CLOUD_PROJECT=floci-local` |
-| Cambios en el código para usar el emulador | **Ninguno.** El cliente oficial detecta `STORAGE_EMULATOR_HOST` y usa credenciales anónimas; `gcsgrep` no sabe que hay un emulador. |
+| Cambios en el código para usar el emulador | **Ninguno.** El cliente oficial detecta `STORAGE_EMULATOR_HOST` y usa credenciales anónimas (excepción de BR-2); `gcsgrep` no sabe que hay un emulador. |
 
 Los tests de integración viven en `tests/integration/test_emulator.py`. Crean un
-bucket efímero `gcsgrep-it-<uuid>` con 108 objetos (texto con y sin match,
-`.gz`, binario con NUL, UTF-8 inválido, un objeto fuera del prefijo y 100
-objetos para el aviso de progreso), ejecutan `python -m gcsgrep` como
-subproceso y borran el bucket al terminar. Se saltean automáticamente si
+bucket efímero `gcsgrep-it-<uuid>` con 122 objetos, ejecutan `python -m gcsgrep`
+como subproceso y borran el bucket al terminar. Se saltean automáticamente si
 `STORAGE_EMULATOR_HOST` no está definido.
+
+| Prefijo sembrado | Contenido | Usado por |
+|---|---|---|
+| `app/` | Texto con y sin match, `.gz`, binario con NUL | VC-4, VC-5, VC-7, VC-11, VC-12, VC-19, VC-20 |
+| `other/` | Un objeto fuera de `app/` | VC-1 |
+| `broken/` | UTF-8 inválido seguido de un objeto legible | VC-6 |
+| `many/` | 100 objetos | VC-8 |
+| `logs/`, `logs-other/` | 3 + 1 objetos con el mismo patrón | VC-2, VC-23 |
+| `edge/` | Última línea sin `\n` | VC-17 |
+| `empty/` | Objeto de 0 bytes | VC-18 |
+| `order/` | `b.log` subido antes que `a.log` | VC-26 |
+| `bytes/` | Objetos de 10 y 20 bytes | VC-24 |
 
 ## Cobertura
 
 | VC | Requerimiento | Ejercitado por | Se observa | Estado |
 |---|---|---|---|---|
-| VC-1 | FR-1 URI válida/inválida | `test_gcsgrep.py::test_parse_gs_uri*`, `test_gcsgrep.py::test_cli_validates_location_before_loading_credentials`; `test_emulator.py::test_vc1_*` | `logs/app/` → exit `2`, stderr `la ubicación debe comenzar con gs://` (se valida antes de cargar credenciales); bucket inexistente → exit `2`, `no se pudo enumerar`; stdout vacío en ambos | ✅ |
-| VC-2 | FR-2 prefijo | `test_gcsgrep.py::test_scan_finds_literal_matches_and_line_numbers`; `test_emulator.py::test_vc2_*` | Con `gs://B/app/` solo aparece `app/server.log`; `other/notes.txt` (fuera del prefijo) no se visita; con `gs://B/` sí aparece | ✅ |
-| VC-3 | FR-3 streaming | `test_gcsgrep.py::test_scan_finds_literal_matches_and_line_numbers`; `test_emulator.py::test_vc4_*` | El scanner consume un `BlobReader` del cliente oficial en chunks de 64 KiB; no se escribe ningún archivo local | ✅ |
-| VC-4 | FR-4 objeto y línea | `test_gcsgrep.py::test_cli_formats_match_and_returns_zero`; `test_emulator.py::test_vc4_*` | `-n` → `gs://B/app/server.log:4:connection timeout after 30s`; sin `-n` → `gs://B/app/server.log:connection timeout after 30s` | ✅ |
-| VC-5 | FR-5 `-i` | `test_gcsgrep.py::test_scan_ignore_case_and_skip_binary_and_gzip`; `test_emulator.py::test_vc5_*` | Con `-i` aparecen `TIMEOUT`, `Request Timeout` y `timeout`; sin `-i` solo la última | ✅ |
-| VC-6 | FR-6 error parcial | `test_gcsgrep.py::test_scan_continues_after_object_error`; `test_emulator.py::test_vc6_*` | `broken/latin1.log` (UTF-8 inválido) → stderr `no se pudo leer ...`; `broken/ok.log` igual se procesa y su match va a stdout; exit `2` | ✅ |
-| VC-7 | FR-7 sin matches | `test_gcsgrep.py::test_cli_exit_code_one_when_no_match`; `test_emulator.py::test_vc7_*` | Exit `1` y stdout vacío | ✅ |
-| VC-8 | FR-8 progreso | `test_gcsgrep.py::test_scan_reports_progress_every_hundred_objects`; `test_emulator.py::test_vc8_*` | Con 100 objetos reales, stderr contiene `objetos procesados: 100` y stdout tiene exactamente 100 matches sin el aviso | ✅ |
-| VC-9 | BR-1 solo lectura | `test_emulator.py::test_vc9_bucket_is_unchanged_after_scans` | Snapshot (nombre, tamaño, `md5_hash`, `generation`) de los 108 objetos idéntico antes y después de tres escaneos, incluyendo uno con error y uno cortado por límite | ✅ |
-| VC-10 | BR-2 permisos | `test_emulator.py::test_vc10_without_credentials_fails_with_two` | Sin emulador y con ADC apuntando a un archivo inexistente → exit `2`, stderr `no se pudieron cargar las credenciales de GCP`, stdout vacío | ✅ (ver nota) |
-| VC-11 | BR-3 límites | `test_gcsgrep.py::test_cli_returns_two_when_object_limit_is_reached`; `test_emulator.py::test_vc11_*` | `--max-objects 2` → `límite de seguridad alcanzado: máximo 2 objetos`, exit `2`; `--max-bytes 10` → `máximo 10 bytes`, exit `2` | ✅ |
-| VC-12 | BR-4 binarios y `.gz` | `test_gcsgrep.py::test_scan_ignore_case_and_skip_binary_and_gzip`; `test_emulator.py::test_vc12_*` | `app/archive.gz` y `app/blob.bin` (contienen `timeout`) no aparecen en stdout ni producen bytes NUL; `app/server.log` sí se procesa | ✅ |
+| VC-1 | FR-1 bucket completo | `test_gcsgrep.py::test_vc1_*`; `test_emulator.py::test_vc1_*` | `gs://B` imprime matches de `app/` y de `other/`; `gs://B/` produce el mismo `stdout` | ✅ |
+| VC-2 | FR-2 prefijo literal | `test_gcsgrep.py::test_vc2_*`; `test_emulator.py::test_vc2_*` | `gs://B/logs/` → exactamente `logs/a.log`, `b.log`, `c.log`; `gs://B/logs` → los cuatro, incluido `logs-other/d.log` | ✅ |
+| VC-3 | FR-3 streaming | `test_gcsgrep.py::test_vc3_*` | Dos matches en líneas que cruzan el borde de la muestra (8 KiB) y del primer chunk (64 KiB) → exactamente 2 líneas; todas las lecturas son ≤ 64 KiB; `open` y `tempfile` parcheados para fallar no se invocan | ✅ |
+| VC-4 | FR-4 formato sin `-n` | `test_gcsgrep.py::test_vc4_*`; `test_emulator.py::test_vc4_*` | `gs://B/app/server.log:connection timeout after 30s` literal | ✅ |
+| VC-5 | FR-5 `-i` | `test_gcsgrep.py::test_vc5_*`; `test_emulator.py::test_vc5_*` | Con `-i` aparecen `TIMEOUT`, `Timeout` y `timeout`; sin `-i` solo la última | ✅ |
+| VC-6 | FR-6 objeto fallido | `test_gcsgrep.py::test_vc6_*`; `test_emulator.py::test_vc6_*` | `stderr` empieza con `gcsgrep: no se pudo leer gs://B/broken/latin1.log:`; el match de `broken/ok.log` va a `stdout`; exit `2`. También con error de permiso al abrir | ✅ |
+| VC-7 | FR-7 sin matches | `test_gcsgrep.py::test_vc7_*`; `test_emulator.py::test_vc7_*` | Exit `1` y `stdout` vacío | ✅ |
+| VC-8 | FR-8 progreso | `test_gcsgrep.py::test_vc8_*`; `test_emulator.py::test_vc8_*` | Con 100 objetos, `stderr` es exactamente `gcsgrep: objetos procesados: 100` y ninguna línea de `stdout` empieza con `gcsgrep:`; con 99 objetos no hay línea de progreso | ✅ |
+| VC-9 | BR-1 solo lectura | `test_emulator.py::test_vc9_*` | Snapshot (nombre, tamaño, `md5_hash`, `generation`) de los 122 objetos idéntico antes y después de cuatro escaneos, incluidos uno con error y dos cortados por límite | ✅ |
+| VC-10 | BR-2 permisos | `test_emulator.py::test_vc10_*` | Sin emulador y con ADC apuntando a un archivo inexistente → exit `2`, `stderr` empieza con `gcsgrep: no se pudieron cargar las credenciales`, `stdout` vacío | ✅ parcial (ver nota) |
+| VC-11 | BR-3 límite de objetos | `test_gcsgrep.py::test_vc11_*`; `test_emulator.py::test_vc11_*` | 1.001 objetos con valores por defecto → `máximo 1000 objetos`, exit `2`, el objeto 1.001 no se abre; exactamente 1.000 → sin mensaje de límite; los objetos `.gz` salteados cuentan para el límite | ✅ |
+| VC-12 | BR-4 binarios y `.gz` | `test_gcsgrep.py::test_vc12_*`; `test_emulator.py::test_vc12_*` | `.gz` (también `.GZ`) y binario con NUL no aparecen en `stdout` ni en `stderr`; el texto siguiente sí; un NUL después de los primeros 8.192 bytes no hace saltear el objeto | ✅ |
 | VC-13 | BR-5 generación | Integración con objeto reemplazado durante el escaneo | — | Iteración 2 |
-| VC-14 | NFR-1 memoria | Benchmark con objeto de 128 MiB | — | Iteración 2 |
-| VC-15 | NFR-2 reintentos | Test de stream transitorio | — | Iteración 2 |
-| VC-16 | NFR-3 scripting | `assert_no_traceback` en todos los casos de error de `test_emulator.py` | En URI inválida, bucket inexistente, objeto ilegible, sin credenciales y límites: matches solo en stdout, mensaje en stderr, sin `Traceback` | ✅ |
+| VC-14 | NFR-1 memoria | Benchmark con objeto de 128 MiB y `/usr/bin/time -v` | — | Iteración 2 |
+| VC-15 | NFR-2 reintentos | Test de stream transitorio (2 y 4 fallos) | — | Iteración 2 |
+| VC-16 | NFR-3 scripting | `test_gcsgrep.py::test_vc16_*`; `assert_no_traceback` en todos los casos de error de `test_emulator.py` | En URI inválido, error de listado, objeto ilegible, sin credenciales, límites y valor de límite inválido: `stdout` solo con matches, `stderr` no vacío con prefijo `gcsgrep: `, sin `Traceback` | ✅ |
+| VC-17 | FR-3 última línea sin `\n` | `test_gcsgrep.py::test_vc17_*`; `test_emulator.py::test_vc17_*` | `a\nb timeout` → `gs://B/edge/nonl.log:2:b timeout`; con `\r\n` el terminador no aparece en la salida | ✅ |
+| VC-18 | FR-3 objeto de 0 bytes | `test_gcsgrep.py::test_vc18_*`; `test_emulator.py::test_vc18_*` | `stdout` y `stderr` vacíos, exit `1`; el objeto se abre (cuenta como inspeccionado) | ✅ |
+| VC-19 | FR-9 formato con `-n` | `test_gcsgrep.py::test_vc19_*`; `test_emulator.py::test_vc19_*` | `gs://B/app/server.log:4:connection timeout after 30s` literal | ✅ |
+| VC-20 | FR-10 exit `0` | `test_gcsgrep.py::test_vc20_*`; `test_emulator.py::test_vc20_*` | Match sin errores → exit `0` y `stderr` vacío | ✅ |
+| VC-21 | FR-11 URI inválido | `test_gcsgrep.py::test_vc21_*`; `test_emulator.py::test_vc21_*` | `B/app/`, `gs://`, `gs:///app`, `gs://a b` → exit `2`, `stdout` vacío, `stderr` empieza con `gcsgrep: `; la fábrica de clientes no se invoca | ✅ |
+| VC-22 | FR-12 fallo al enumerar | `test_gcsgrep.py::test_vc22_*`; `test_emulator.py::test_vc22_*` | Bucket inexistente → exit `2`, `stdout` vacío, `stderr` empieza con `gcsgrep: no se pudo enumerar` | ✅ |
+| VC-23 | FR-13 `--max-objects` | `test_gcsgrep.py::test_vc23_*`; `test_emulator.py::test_vc23_*` | 3 objetos: `--max-objects 2` → exit `2` y `máximo 2 objetos`; `--max-objects 3` → exit `0` sin mensaje de límite | ✅ |
+| VC-24 | FR-14 `--max-bytes` | `test_gcsgrep.py::test_vc24_*`; `test_emulator.py::test_vc24_*` | 10 + 20 bytes: `--max-bytes 29` → match del primero en `stdout`, `máximo 29 bytes`, exit `2`, el segundo no se abre; `--max-bytes 30` → exit `0` con 2 matches | ✅ |
+| VC-25 | FR-15 valor de límite inválido | `test_gcsgrep.py::test_vc25_*`; `test_emulator.py::test_vc25_*` | `--max-objects 0`, `--max-objects -5`, `--max-bytes abc` → exit `2`, `stdout` vacío, `debe ser un entero positivo`; no se contacta a GCS | ✅ |
+| VC-26 | FR-16 orden | `test_gcsgrep.py::test_vc26_*`; `test_emulator.py::test_vc26_*` | Con `b.log` subido antes que `a.log`: salida `a.log:2`, `b.log:1`, `b.log:3`; dos corridas idénticas byte a byte | ✅ |
+| VC-27 | BR-3 límite de bytes por defecto | `test_gcsgrep.py::test_vc27_*` | Objeto que declara 1 GiB + 1 tras uno con match: el match queda en `stdout`, `máximo 1073741824 bytes`, exit `2`, el objeto grande no se abre | ✅ |
+| VC-28 | NFR-4 rendimiento | Benchmark de 5 corridas contra descarga + `grep -F` | — | Iteración 2 |
 
-**Nota sobre VC-10:** el emulador no aplica IAM, así que el caso "credenciales
-válidas pero sin permiso de lectura sobre el bucket" no es reproducible
-localmente. Ese camino queda cubierto por el manejo genérico de errores de
-enumeración (`no se pudo enumerar`, exit `2`): cualquier respuesta 403 de GCS
-sigue exactamente la misma ruta de código que el 404 verificado en VC-1.
+**Nota sobre VC-10:** el emulador no aplica IAM, así que la segunda mitad de
+VC-10 (identidad sin `storage.objects.get`) no es reproducible localmente y
+queda para la corrida contra GCP real (`GCSGREP_INTEGRATION=1`) de la Iteración 2.
+Por código, un 403 al abrir un objeto sigue la misma ruta que el error de permiso
+verificado en `test_vc6_permission_error_on_open_is_a_failed_object`, y un 403 al
+listar sigue la misma ruta que el 404 de VC-22.
+
+**Nota sobre VC-11 y VC-27:** los casos de 1.000/1.001 objetos y de un objeto de
+más de 1 GiB se verifican con el cliente falso, porque sembrarlos en el emulador
+no agrega evidencia sobre la regla y encarece la suite. El corte por límite
+contra la API real se verifica con límites chicos en VC-11, VC-23 y VC-24.
 
 ## Comandos de verificación
 
@@ -69,7 +102,7 @@ Sin infraestructura (tests unitarios; los de integración se saltean):
 
 ```bash
 pytest -q
-# 11 passed, 15 skipped
+# 38 passed, 28 skipped
 ```
 
 Con el emulador Floci:
@@ -79,7 +112,7 @@ docker compose up -d --wait
 export STORAGE_EMULATOR_HOST=http://localhost:4588
 export GOOGLE_CLOUD_PROJECT=floci-local
 pytest -q
-# 26 passed in 12.23s (Windows) · 26 passed in 2.97s (WSL, Ubuntu 24.04)
+# 66 passed in 16.78s (Windows)
 ```
 
 ## Corrida manual documentada

@@ -128,11 +128,22 @@ los nombres contienen directorios.
 
 El prefijo de GCS ya define el alcance recursivo, por lo que `-r` no es necesario.
 
-Quedan para después `-E`, `-l`, `-c`, `--include` y `--json`.
+Quedan para después `-E`, `-l`, `-c`, `--include` y `--json`. `-v` no entra en
+la v1.
+
+Además, los límites de costo de 4.6 se ajustan con `--max-objects N` y
+`--max-bytes N`, que no son flags de `grep`.
+
+**Motivo:** `-i` y `-n` son los dos flags que usa la experiencia buscada
+(`gcsgrep -i -n "timeout" gs://logs/app/`, §1). Cubren los pedidos del borrador de
+buscar sin distinguir mayúsculas (FR-d) y de mostrar la línea (FR-c). Los demás
+flags no hacen falta para responder "en qué objeto y en qué línea". Se difieren
+para que la v1 sea el camino más chico hacia una herramienta útil.
 
 ### 4.5 Binarios y `.gz`
 
-**Decisión:** saltear `.gz` y objetos cuyo contenido inicial contiene un byte NUL.
+**Decisión:** saltear `.gz` y objetos cuyos primeros 8.192 bytes contienen un byte
+NUL.
 Procesar como texto los objetos UTF-8 restantes. Un UTF-8 inválido se informa como
 error de lectura.
 
@@ -141,6 +152,9 @@ No se descomprime `.gz` en la primera entrega.
 **Motivo:** evita imprimir basura binaria y mantiene el uso de memoria y el alcance
 de la implementación controlables. `Content-Type` se considera una pista, no una
 prueba suficiente, porque sus metadatos pueden ser incorrectos.
+
+**Trade-off aceptado:** la heurística del byte NUL saltea como binario un texto
+codificado en UTF-16. Como la v1 solo soporta UTF-8, se acepta.
 
 ### 4.6 Guardrails de costo
 
@@ -152,22 +166,32 @@ Máximo de bytes declarados: 1 GiB
 ```
 
 El límite que se alcance primero detiene la ejecución, informa el motivo por
-`stderr` y devuelve código `2`. Ambos valores pueden ajustarse con flags.
+`stderr` y devuelve código `2`. Los valores se ajustan con `--max-objects N` y
+`--max-bytes N`, que aceptan enteros positivos, con `N` en bytes para el segundo.
+
+El límite de bytes se evalúa sobre el tamaño declarado en el listado, antes de
+leer cada objeto, y no sobre los bytes efectivamente leídos. Así se evita empezar
+a leer un objeto que ya se sabe que excede el tope.
 
 **Motivo:** las lecturas de GCS pueden generar costos y un prefijo amplio puede
 ser accidental. No se agrega todavía un modo ilimitado.
 
 ### 4.7 Formato de salida
 
-**Decisión:** una línea por match, con formato estilo grep:
+**Decisión:** una línea por match, con formato estilo grep y `:` como separador:
 
 ```text
-gs://bucket/objeto:42:contenido de la línea
+gs://bucket/objeto:contenido de la línea        (sin -n)
+gs://bucket/objeto:42:contenido de la línea     (con -n)
 ```
 
-Con `-n` se incluye el número de línea; sin `-n` se imprime el URI y el texto.
-Los matches van a `stdout`; errores y progreso van a `stderr`. No se usan colores
-ni JSON en la primera entrega.
+Los matches van a `stdout`; errores y progreso van a `stderr` con el prefijo
+`gcsgrep: `. No se usan colores ni JSON en la primera entrega.
+
+**Motivo:** es el mismo formato que `grep -H` y `grep -Hn` usan con varios
+archivos, así que los hábitos y scripts existentes (`cut -d:`, editores que
+abren `archivo:línea`) siguen sirviendo. Se imprime el URI completo para poder
+pasarlo tal cual a otros comandos que aceptan `gs://`.
 
 ### 4.8 Exit codes
 
@@ -201,6 +225,20 @@ restantes.
 
 **Motivo:** GCS permite identificar versiones individuales, pero congelar todo el
 bucket excede el alcance de la primera entrega.
+
+### 4.11 Reintentos de red
+
+**Decisión:** reintentar hasta 3 veces los errores transitorios de lectura
+(timeout, conexión cortada, HTTP 429 o 5xx), con el backoff exponencial por
+defecto de la librería oficial: 1 s, 2 s y 4 s. El reintento vuelve a pedir el
+tramo en curso. Al agotar los reintentos, el objeto se informa como fallido, se
+continúa con el resto y la ejecución termina con código `2`.
+
+**Motivo:** los errores transitorios de GCS suelen resolverse en segundos. Con
+3 reintentos, la espera extra por objeto queda acotada a unos 7 s, así que la
+corrida no parece colgada y una falla persistente no bloquea a los demás objetos.
+Usar el mecanismo de la librería oficial evita reimplementar qué errores son
+reintentables.
 
 ## 5. Notas de diseño y arquitectura
 

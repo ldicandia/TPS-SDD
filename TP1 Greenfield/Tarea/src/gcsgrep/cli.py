@@ -70,7 +70,7 @@ def main(
             print(f"gcsgrep: no se pudo leer {name}: {error}", file=stderr)
 
         def emit_progress(count: int) -> None:
-            print(f"gcsgrep: objetos procesados: {count}", file=stderr)
+            print(f"gcsgrep: objetos inspeccionados: {count}", file=stderr)
 
         result = scan(
             client,

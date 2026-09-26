@@ -44,6 +44,8 @@ SEED_OBJECTS: dict[str, bytes] = {
     # Prefijo con un objeto ilegible (UTF-8 inválido) seguido de uno legible.
     "broken/latin1.log": b"caf\xe9 timeout\n",
     "broken/ok.log": b"timeout here\n",
+    # Objeto con una línea ilegible en el medio: se conservan las anteriores (FR-6).
+    "partial/mixed.log": b"timeout 1\ncaf\xe9 timeout 2\ntimeout 3\n",
     # Prefijo literal (FR-2): gs://B/logs/ excluye logs-other/, gs://B/logs no.
     "logs/a.log": b"prefixmark\n",
     "logs/b.log": b"prefixmark\n",
@@ -188,6 +190,15 @@ def test_vc17_last_line_without_newline_counts_as_line(seeded_bucket):
     assert run.stdout_lines == [f"{seeded_bucket.uri('edge/nonl.log')}:2:b timeout"]
 
 
+def test_vc29_empty_pattern_matches_every_line(seeded_bucket):
+    run = run_cli("-n", "", seeded_bucket.uri("edge/"))
+    assert run.code == 0
+    assert run.stdout_lines == [
+        f"{seeded_bucket.uri('edge/nonl.log')}:1:a",
+        f"{seeded_bucket.uri('edge/nonl.log')}:2:b timeout",
+    ]
+
+
 def test_vc18_empty_object_produces_no_output(seeded_bucket):
     run = run_cli("timeout", seeded_bucket.uri("empty/"))
     assert run.code == 1
@@ -240,6 +251,16 @@ def test_vc6_unreadable_object_is_reported_and_scan_continues(seeded_bucket):
     assert_no_traceback(run)
 
 
+def test_vc6_lines_before_the_invalid_line_are_kept(seeded_bucket):
+    run = run_cli("-n", "timeout", seeded_bucket.uri("partial/"))
+    assert run.code == 2
+    assert run.stdout_lines == [f"{seeded_bucket.uri('partial/mixed.log')}:1:timeout 1"]
+    assert run.stderr.startswith(
+        f"gcsgrep: no se pudo leer {seeded_bucket.uri('partial/mixed.log')}:"
+    )
+    assert_no_traceback(run)
+
+
 # --- VC-7 / FR-7: sin matches ------------------------------------------------
 
 
@@ -250,6 +271,13 @@ def test_vc7_no_match_returns_one_with_empty_stdout(seeded_bucket):
     assert_no_traceback(run)
 
 
+def test_vc30_prefix_without_objects_returns_one(seeded_bucket):
+    run = run_cli("timeout", seeded_bucket.uri("prefijo-sin-objetos/"))
+    assert run.code == 1
+    assert run.stdout == ""
+    assert run.stderr == ""
+
+
 # --- VC-8 / FR-8: progreso ---------------------------------------------------
 
 
@@ -257,7 +285,7 @@ def test_vc8_progress_every_hundred_objects_goes_to_stderr(seeded_bucket):
     run = run_cli("filler", seeded_bucket.uri("many/"))
     assert run.code == 0
     assert len(run.stdout_lines) == 100
-    assert run.stderr.splitlines() == ["gcsgrep: objetos procesados: 100"]
+    assert run.stderr.splitlines() == ["gcsgrep: objetos inspeccionados: 100"]
     assert not any(line.startswith("gcsgrep:") for line in run.stdout_lines)
 
 
@@ -275,11 +303,20 @@ def test_vc20_match_without_errors_returns_zero(seeded_bucket):
 
 
 @pytest.mark.parametrize("location", ["{name}/app/", "gs://", "gs:///app", "gs://a b"])
-def test_vc21_invalid_uri_exits_two_with_message(seeded_bucket, location):
-    run = run_cli("timeout", location.format(name=seeded_bucket.name))
+def test_vc21_invalid_uri_exits_two_with_message(seeded_bucket, location, tmp_path):
+    # Sin credenciales ni emulador: si el CLI intentara cargarlas, el mensaje sería otro.
+    run = run_cli(
+        "timeout",
+        location.format(name=seeded_bucket.name),
+        env_overrides={
+            "STORAGE_EMULATOR_HOST": None,
+            "GOOGLE_APPLICATION_CREDENTIALS": str(tmp_path / "missing.json"),
+        },
+    )
     assert run.code == 2
     assert run.stdout == ""
     assert run.stderr.startswith("gcsgrep: ")
+    assert "credenciales" not in run.stderr
     assert_no_traceback(run)
 
 

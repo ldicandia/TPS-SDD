@@ -95,6 +95,12 @@ No se acepta un archivo de service account por flag ni se almacenan credenciales
 de subir secretos al repositorio y mantiene el uso compatible con entornos locales
 y de CI.
 
+**Trade-off aceptado:** sin un flag para pasar un archivo de clave, quien necesite
+usar una service account tiene que exponerla por `GOOGLE_APPLICATION_CREDENTIALS`,
+que ADC ya lee. Se pierde la comodidad de elegir la identidad por invocación, a
+cambio de que la herramienta nunca reciba un secreto por la línea de comandos,
+donde queda en el historial de la shell y en la lista de procesos.
+
 Si no hay credenciales válidas, el comando termina con código `2` y un mensaje por
 `stderr`.
 
@@ -153,6 +159,12 @@ No se descomprime `.gz` en la primera entrega.
 de la implementación controlables. `Content-Type` se considera una pista, no una
 prueba suficiente, porque sus metadatos pueden ser incorrectos.
 
+**Por qué 8.192 bytes:** sigue la heurística de GNU `grep` y de `git`, que
+buscan un NUL al principio del contenido (`git` mira los primeros 8.000 bytes;
+se redondea a 8 KiB). Una muestra de 8 KiB alcanza para
+reconocer los formatos binarios comunes, que suelen tener NUL en la cabecera, y
+se lee en el primer tramo del stream sin sumar lecturas.
+
 **Trade-off aceptado:** la heurística del byte NUL saltea como binario un texto
 codificado en UTF-16. Como la v1 solo soporta UTF-8, se acepta.
 
@@ -175,6 +187,18 @@ a leer un objeto que ya se sabe que excede el tope.
 
 **Motivo:** las lecturas de GCS pueden generar costos y un prefijo amplio puede
 ser accidental. No se agrega todavía un modo ilimitado.
+
+**Por qué esos valores:** 1.000 objetos es el tamaño de una página del listado de
+GCS, así que el límite por defecto se alcanza sin pedir una segunda página. 1 GiB
+alcanza para un día de logs de una aplicación chica, que es el caso de uso típico,
+y leerlo completo cuesta unos USD 0,12 de egreso a internet (y nada dentro de la
+misma región), así que un error con los valores por defecto sale barato.
+
+**Trade-off aceptado:** un tope bajo protege contra un costo accidental, pero
+obliga a pasar `--max-objects`/`--max-bytes` en búsquedas legítimas grandes. Se
+prefiere que la ejecución falle ruidosamente (exit `2` y el motivo por `stderr`)
+antes que escanear de más sin avisar. Un límite alcanzado siempre devuelve `2`,
+aunque no haya habido matches, porque el prefijo no se revisó completo.
 
 ### 4.7 Formato de salida
 
@@ -204,7 +228,16 @@ pasarlo tal cual a otros comandos que aceptan `gs://`.
 | `2` | Error operativo, entrada inválida, credenciales o límite alcanzado. |
 
 Si hubo matches pero falló la lectura de al menos un objeto, se devuelve `2` para
-dejar claro que el resultado es parcial.
+dejar claro que el resultado es parcial. De un objeto fallido se imprimen los
+matches de las líneas anteriores a la línea donde se detectó la falla, y ninguno
+de ahí en adelante. Por eso el contenido se decodifica línea por línea y no por
+bloque: así la salida parcial no depende de dónde caen los bordes de lectura.
+
+**Motivo:** el usuario objetivo ya usa `grep`, y los scripts existentes ya
+distinguen "encontró" (`0`), "no encontró" (`1`) y "falló" (`2`)
+(`if gcsgrep ...; then`, `set -e`, `|| true`). Con otra convención, esos scripts
+tratarían un error como "sin matches" o al revés. Un resultado parcial devuelve
+`2` y no `0`, porque un script que ve `0` supone que se revisó todo el prefijo.
 
 ### 4.9 Concurrencia
 
@@ -229,16 +262,24 @@ bucket excede el alcance de la primera entrega.
 ### 4.11 Reintentos de red
 
 **Decisión:** reintentar hasta 3 veces los errores transitorios de lectura
-(timeout, conexión cortada, HTTP 429 o 5xx), con el backoff exponencial por
-defecto de la librería oficial: 1 s, 2 s y 4 s. El reintento vuelve a pedir el
-tramo en curso. Al agotar los reintentos, el objeto se informa como fallido, se
-continúa con el resto y la ejecución termina con código `2`.
+(timeout, conexión cortada, HTTP 429 o 5xx), con esperas fijas de 1 s, 2 s y 4 s
+(backoff exponencial sin aleatoriedad). El reintento vuelve a pedir el tramo en
+curso desde el mismo offset. Al agotar los reintentos, el objeto se informa como
+fallido, se continúa con el resto y la ejecución termina con código `2`.
 
 **Motivo:** los errores transitorios de GCS suelen resolverse en segundos. Con
-3 reintentos, la espera extra por objeto queda acotada a unos 7 s, así que la
-corrida no parece colgada y una falla persistente no bloquea a los demás objetos.
-Usar el mecanismo de la librería oficial evita reimplementar qué errores son
-reintentables.
+3 reintentos, la espera extra por objeto queda acotada a 7 s, así que la corrida
+no parece colgada y una falla persistente no bloquea a los demás objetos. Qué
+errores son reintentables se toma de la clasificación de la librería oficial,
+para no reimplementarla. La cantidad de intentos y las esperas los fija
+`gcsgrep`, porque la política por defecto de la librería reintenta por tiempo
+(hasta un plazo total) y con esperas aleatorias, y así no se podría verificar
+NFR-2.
+
+**Trade-off aceptado:** la aleatoriedad (jitter) sirve para que muchos clientes
+no reintenten a la vez. `gcsgrep` hace una sola lectura secuencial por
+ejecución, así que ese riesgo es bajo y se prefiere un comportamiento
+determinista y verificable.
 
 ## 5. Notas de diseño y arquitectura
 

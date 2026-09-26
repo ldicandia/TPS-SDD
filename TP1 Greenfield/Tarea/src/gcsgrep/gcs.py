@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import codecs
 from dataclasses import dataclass
 from itertools import chain
 from typing import Callable, Iterable
@@ -59,28 +58,29 @@ def create_storage_client():
         raise GcsGrepError(f"no se pudieron cargar las credenciales de GCP: {exc}") from exc
 
 
+def _decode_line(raw: bytes) -> str:
+    return raw.removesuffix(b"\r").decode("utf-8")
+
+
 def _iter_utf8_lines(stream, first_chunk: bytes) -> Iterable[str]:
-    """Decode a stream incrementally and yield lines without buffering the object."""
-    decoder = codecs.getincrementaldecoder("utf-8")("strict")
-    pending = ""
+    """Split a stream into lines and decode each one without buffering the object.
+
+    Decoding line by line makes a failed object deterministic (FR-6): every line
+    before the first invalid one is yielded, and none after it.
+    """
+    pending = b""
 
     for chunk in chain(
         (first_chunk,),
         iter(lambda: stream.read(CHUNK_SIZE), b""),
     ):
-        pending += decoder.decode(chunk)
-        parts = pending.splitlines(keepends=True)
-        if parts and not parts[-1].endswith(("\n", "\r")):
-            pending = parts.pop()
-        else:
-            pending = ""
+        pending += chunk
+        *lines, pending = pending.split(b"\n")
+        for line in lines:
+            yield _decode_line(line)
 
-        for part in parts:
-            yield part.rstrip("\r\n")
-
-    pending += decoder.decode(b"", final=True)
     if pending:
-        yield pending.rstrip("\r\n")
+        yield _decode_line(pending)
 
 
 def _scan_blob(

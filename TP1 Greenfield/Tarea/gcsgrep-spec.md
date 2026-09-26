@@ -1,8 +1,7 @@
 # gcsgrep — spec
 
-> Estado: revisada (v1.1). Corrige los hallazgos del reporte de revisión externa
-> `correccion-de-specs v1.1` sobre el hash `a9c77bd`. Esta especificación define
-> el contrato de la v1 y no deja preguntas abiertas. Fue construida a partir de
+> Estado: revisada (v1.3). Esta especificación define el contrato de la v1 y no
+> deja preguntas abiertas. Fue construida a partir de
 > [`gcsgrep-base-context.md`](./gcsgrep-base-context.md). La implementación se
 > divide en iteraciones en [`gcsgrep-plan.md`](./gcsgrep-plan.md).
 
@@ -46,7 +45,7 @@ Cloud Storage sin descargarlos previamente a disco.
   mantener.
 - Observabilidad más allá de lo que se imprime por `stderr` (progreso y errores):
   no hay logs estructurados, métricas ni trazas. *Motivo:* es una herramienta de
-  corrida corta. `stderr` y el exit code alcanzan para diagnosticar.
+  ejecución corta. `stderr` y el exit code alcanzan para diagnosticar.
 
 ## Actores
 
@@ -62,11 +61,16 @@ Estos términos se usan con un único significado en todo el documento.
 
 | Término | Definición |
 |---|---|
+| Ejecución | Una invocación de `gcsgrep`, desde el parseo de argumentos hasta el exit code. |
 | URI | Argumento de ubicación con esquema `gs://`: `gs://bucket` o `gs://bucket/prefijo`. |
+| URI inválido | Argumento de ubicación que no es un URI: le falta el esquema `gs://` (`logs/app`), le falta el bucket (`gs://`, `gs:///x`) o el nombre del bucket contiene espacios (`gs://a b`). |
+| Error de enumeración | GCS no devuelve el listado de objetos del URI: el bucket no existe o la identidad no tiene `storage.objects.list` sobre él. |
+| Flag de límite | `--max-objects` o `--max-bytes` (BR-3). |
+| Valor de límite inválido | Valor de un flag de límite que no es un entero positivo (`0`, `-5`, `abc`). |
 | Prefijo | Todo lo que sigue a `gs://bucket/`, comparado literalmente contra el nombre del objeto. No se le agrega `/`. Si falta, vale `""`. |
 | Objeto inspeccionado | Objeto enumerado bajo el prefijo que cuenta para los límites de BR-3, se lea o se saltee. |
 | Línea | Secuencia de caracteres terminada en `\n`, en `\r\n` o en el fin del objeto. El terminador no forma parte de la línea. La última línea sin terminador cuenta como línea. Se numeran desde `1` en cada objeto. |
-| Match | Línea que contiene el patrón como subcadena literal. |
+| Match | Línea que contiene el patrón como subcadena literal. El patrón vacío es subcadena de toda línea, así que matchea todas, como en `grep`. |
 | Objeto fallido | Objeto que no pudo leerse completo (UTF-8 inválido, permiso denegado, generación no disponible o reintentos agotados). |
 
 ## Requerimientos funcionales
@@ -83,7 +87,7 @@ matches de los objetos de todos los prefijos del bucket.
 
 ### FR-2 — Buscar bajo un prefijo
 
-**Dado** un URI `gs://bucket/prefijo`, **cuando** se ejecuta una búsqueda,
+**Dado** un URI `gs://bucket/prefijo`, **cuando** termina la ejecución,
 **entonces** solo se inspeccionan los objetos cuyo nombre comienza literalmente
 con `prefijo`, sin modificar el bucket.
 
@@ -94,16 +98,21 @@ con `prefijo`, sin modificar el bucket.
 
 ### FR-3 — Detectar matches en streaming
 
-**Dado** un objeto de texto UTF-8, **cuando** se lo procesa, **entonces** la
-herramienta lee su contenido de forma incremental, sin escribirlo en un archivo
-local, y emite una línea de salida por cada match.
+**Dado** un objeto de texto UTF-8 que GCS entrega en varios trozos, **cuando** se
+lo inspecciona, **entonces** `stdout` recibe exactamente una línea por cada línea
+del objeto que es un match, aunque esa línea cruce el borde entre dos trozos.
 
 > **VC-3** — Un objeto entregado por un stream en trozos de 64 KiB, con 2 matches
 > en líneas que cruzan el borde entre trozos, produce exactamente 2 líneas en
-> `stdout`, y no se crea ningún archivo temporal.
+> `stdout`.
 >
 > **VC-17** — Un objeto con contenido `a\nb timeout` (la última línea sin `\n`)
 > produce con `-n` la salida `gs://B/obj:2:b timeout`.
+>
+> **VC-29** — Con el objeto `gs://B/edge/nonl.log` de contenido `a\nb timeout`
+> (sin `\n` final) y el patrón vacío, `gcsgrep -n "" gs://B/edge/` imprime
+> exactamente, en este orden, `gs://B/edge/nonl.log:1:a` y
+> `gs://B/edge/nonl.log:2:b timeout`, y termina con `0`.
 >
 > **VC-18** — Un objeto de 0 bytes no produce salida en `stdout` ni en `stderr` y
 > cuenta como objeto inspeccionado. Si es el único objeto, el exit code es `1`.
@@ -129,31 +138,45 @@ minúsculas.
 
 ### FR-6 — Continuar ante un objeto fallido
 
-**Dado** un conjunto de objetos donde uno es un objeto fallido, **cuando** se
-ejecuta una búsqueda, **entonces** `stderr` recibe
-`gcsgrep: no se pudo leer <URI del objeto>: <detalle>`, se procesan los objetos
+**Dado** un conjunto de objetos donde uno es un objeto fallido, **cuando** termina
+la ejecución, **entonces** `stderr` recibe
+`gcsgrep: no se pudo leer <URI del objeto>: <detalle>`, se leen los objetos
 restantes y el exit code es `2`, aunque haya habido matches.
 
+La falla se ubica en una línea: la primera línea con una secuencia UTF-8
+inválida, o la línea que se estaba recibiendo cuando se agotaron los reintentos
+(NFR-2). Los matches de las líneas anteriores a esa línea se imprimen y quedan en
+`stdout`. De esa línea en adelante, el objeto no produce ninguna línea en
+`stdout`. El exit code `2` indica que la salida de ese objeto es parcial.
+
 > **VC-6** — Con `broken/latin1.log` (UTF-8 inválido) seguido de `broken/ok.log`
-> (contiene `timeout`), `gcsgrep timeout gs://B/broken/` deja en `stdout` el match
-> de `ok.log`, en `stderr` una línea que empieza con
+> (contiene `timeout`), `gcsgrep timeout gs://B/broken/` deja en `stdout`
+> exactamente el match de `ok.log`, en `stderr` una línea que empieza con
 > `gcsgrep: no se pudo leer gs://B/broken/latin1.log:`, y termina con exit `2`.
+> Con `partial/mixed.log` de contenido `timeout 1\ncaf\xe9 timeout 2\ntimeout 3\n`
+> (la segunda línea tiene el byte inválido `0xE9`), `gcsgrep -n timeout
+> gs://B/partial/` imprime exactamente `gs://B/partial/mixed.log:1:timeout 1`,
+> `stderr` empieza con `gcsgrep: no se pudo leer gs://B/partial/mixed.log:` y
+> el exit code es `2`.
 
 ### FR-7 — Informar ausencia de matches
 
-**Dado** un conjunto de objetos sin objetos fallidos y sin matches, **cuando**
-termina la búsqueda, **entonces** `stdout` queda vacío y el exit code es `1`.
+**Dado** objetos legibles que no contienen el patrón, sin alcanzar un límite,
+**cuando** termina la ejecución, **entonces** `stdout` queda vacío y el exit code
+es `1`.
 
-> **VC-7** — Una búsqueda sin matches deja `stdout` vacío y devuelve `1`.
+> **VC-7** — `gcsgrep no-such-text gs://B/app/` (objetos legibles sin el patrón)
+> deja `stdout` vacío y devuelve `1`. Si la ejecución alcanza un límite sin haber
+> tenido matches, el exit code es `2` (BR-3, VC-11), no `1`.
 
 ### FR-8 — Informar progreso
 
-**Dado** un escaneo, **cuando** el número de objetos inspeccionados llega a un
+**Dado** una ejecución, **cuando** el número de objetos inspeccionados llega a un
 múltiplo de 100, **entonces** `stderr` recibe la línea
-`gcsgrep: objetos procesados: <N>`.
+`gcsgrep: objetos inspeccionados: <N>`.
 
 > **VC-8** — Con 100 objetos bajo el prefijo, `stderr` contiene exactamente una
-> línea `gcsgrep: objetos procesados: 100` y `stdout` no contiene ninguna línea
+> línea `gcsgrep: objetos inspeccionados: 100` y `stdout` no contiene ninguna línea
 > que empiece con `gcsgrep:`. Con 99 objetos, `stderr` no contiene esa línea.
 
 ### FR-9 — Formato de salida con `-n`
@@ -167,7 +190,7 @@ múltiplo de 100, **entonces** `stderr` recibe la línea
 
 ### FR-10 — Exit code con matches
 
-**Dado** un escaneo que termina sin objetos fallidos y sin alcanzar un límite,
+**Dado** una ejecución que termina sin objetos fallidos y sin alcanzar un límite,
 **cuando** hubo al menos un match, **entonces** el exit code es `0`.
 
 > **VC-20** — `gcsgrep timeout gs://B/app/` sobre objetos legibles con al menos un
@@ -175,19 +198,20 @@ múltiplo de 100, **entonces** `stderr` recibe la línea
 
 ### FR-11 — Rechazar un URI inválido
 
-**Dado** un URI sin esquema `gs://`, sin bucket (`gs://`, `gs:///x`) o con
-espacios en el nombre del bucket, **cuando** se ejecuta el comando, **entonces**
+**Dado** un URI inválido, **cuando** se ejecuta el comando, **entonces**
 `stderr` recibe `gcsgrep: <motivo>`, `stdout` queda vacío y el exit code es `2`,
 sin cargar credenciales ni contactar a GCS.
 
-> **VC-21** — `gcsgrep x logs/app`, `gcsgrep x gs://` y `gcsgrep x "gs://a b"`
-> terminan con `2`, `stderr` empieza con `gcsgrep: ` y la fábrica de clientes de
-> GCS no se invoca.
+> **VC-21** — Sin credenciales (`GOOGLE_APPLICATION_CREDENTIALS` apuntando a un
+> archivo inexistente) y sin emulador, `gcsgrep x logs/app`, `gcsgrep x gs://`,
+> `gcsgrep x gs:///x` y `gcsgrep x "gs://a b"` terminan con `2`, `stdout` vacío,
+> `stderr` empieza con `gcsgrep: ` y no contiene `credenciales`: el URI se
+> rechaza antes de cargar credenciales.
 
 ### FR-12 — Fallo al enumerar
 
-**Dado** un URI cuyo bucket no existe o no se puede listar, **cuando** se
-ejecuta la búsqueda, **entonces** `stderr` recibe
+**Dado** un URI que produce un error de enumeración, **cuando** se ejecuta el
+comando, **entonces** `stderr` recibe
 `gcsgrep: no se pudo enumerar gs://<bucket>/<prefijo>: <detalle>` y el exit code
 es `2`.
 
@@ -201,7 +225,8 @@ es `2`.
 de `1000`.
 
 > **VC-23** — Con 3 objetos bajo el prefijo, `--max-objects 2` termina con `2` y
-> el motivo del límite, y `--max-objects 3` no alcanza el límite.
+> `stderr` contiene `gcsgrep: límite de seguridad alcanzado: máximo 2 objetos`;
+> `--max-objects 3` termina con `0` y sin ese mensaje.
 
 ### FR-14 — Ajustar el límite de bytes
 
@@ -209,29 +234,48 @@ de `1000`.
 **entonces** el límite de bytes declarados de BR-3 pasa a ser `N` en lugar de
 `1073741824` (1 GiB).
 
-> **VC-24** — Con objetos que declaran 10 y 20 bytes, `--max-bytes 29` termina
-> con `2` y el motivo del límite antes de leer el segundo objeto, y
-> `--max-bytes 30` no alcanza el límite.
+> **VC-24** — Con objetos que declaran 10 y 20 bytes y contienen el patrón,
+> `--max-bytes 29` imprime solo el match del primero, `stderr` contiene
+> `gcsgrep: límite de seguridad alcanzado: máximo 29 bytes` y termina con `2`;
+> `--max-bytes 30` imprime los dos matches y termina con `0`.
 
 ### FR-15 — Rechazar un valor de límite inválido
 
-**Dado** un valor que no es un entero positivo (`0`, `-5`, `abc`), **cuando** se
-pasa a `--max-objects` o a `--max-bytes`, **entonces** el comando termina con
-exit `2` y un mensaje de uso por `stderr`, sin contactar a GCS.
+**Dado** un flag de límite con un valor de límite inválido, **cuando** se
+ejecuta el comando, **entonces** `stdout` queda vacío, `stderr` contiene
+`debe ser un entero positivo` y el exit code es `2`, sin contactar a GCS.
 
 > **VC-25** — `gcsgrep --max-objects 0 x gs://B` y `gcsgrep --max-bytes abc x gs://B`
 > terminan con `2`, `stdout` vacío y `stderr` contiene `debe ser un entero positivo`.
 
 ### FR-16 — Orden de la salida
 
-**Dado** un escaneo con matches en varios objetos, **cuando** se imprimen los
+**Dado** una ejecución con matches en varios objetos, **cuando** se imprimen los
 resultados, **entonces** los objetos aparecen en el orden en que GCS los enumera
 (lexicográfico por nombre) y, dentro de cada objeto, las líneas aparecen en orden
 creciente.
 
 > **VC-26** — Con matches en `app/b.log` (líneas 1 y 3) y `app/a.log` (línea 2),
 > la salida con `-n` es, en este orden: `a.log:2`, `b.log:1`, `b.log:3`. Dos
-> corridas sobre el mismo bucket producen la misma salida byte a byte.
+> ejecuciones sobre el mismo bucket producen la misma salida byte a byte.
+
+### FR-17 — URI sin objetos
+
+**Dado** un URI válido cuyo listado no devuelve ningún objeto, **cuando** termina
+la ejecución, **entonces** `stdout` y `stderr` quedan vacíos y el exit code es
+`1`.
+
+> **VC-30** — `gcsgrep timeout gs://B/prefijo-sin-objetos/` deja `stdout` y
+> `stderr` vacíos y devuelve `1`.
+
+### FR-18 — Sin copia local
+
+**Dado** un objeto bajo el URI, **cuando** se lo inspecciona, **entonces** no se
+crea ni se escribe ningún archivo en el sistema de archivos local.
+
+> **VC-31** — Con toda apertura de archivos locales y toda creación de archivos
+> temporales bloqueadas (cualquier intento hace fallar la ejecución), el objeto
+> de VC-3 se inspecciona completo y produce sus 2 líneas en `stdout`.
 
 ## Reglas de negocio
 
@@ -246,7 +290,7 @@ de GCS.
 *Excepciones:* ninguna. La preparación y limpieza del bucket de prueba la hacen
 los tests, no `gcsgrep`.
 
-> **VC-9** — Tras correr todos los escaneos de la suite de integración, los
+> **VC-9** — Tras todas las ejecuciones de la suite de integración, los
 > nombres, tamaños, hashes MD5, generaciones y metadatos de los objetos de prueba
 > son idénticos a los registrados antes.
 
@@ -300,8 +344,9 @@ ser accidental.
 porque el límite se evalúa sobre el listado, antes de leerlos. No existe un modo
 ilimitado.
 
-> **VC-11** — Con 1.001 objetos bajo el prefijo y valores por defecto, la
-> ejecución termina con `2` y el mensaje de límite de objetos. Con exactamente
+> **VC-11** — Con 1.001 objetos sin el patrón bajo el prefijo y valores por
+> defecto, la ejecución termina con `2` (no `1`, aunque no haya matches) y el
+> mensaje de límite de objetos. Con exactamente
 > 1.000 objetos no aparece el mensaje de límite.
 >
 > **VC-27** — Si un objeto que declara más de 1 GiB sigue a otro con match, el
@@ -313,14 +358,14 @@ ilimitado.
 Se saltean sin error los objetos cuyo nombre termina en `.gz` (sin distinguir
 mayúsculas) y los objetos cuyos primeros 8.192 bytes contienen un byte NUL
 (`0x00`). Un objeto que no se saltea y contiene UTF-8 inválido es un objeto
-fallido (FR-6). Saltar un objeto no produce salida y no cancela la búsqueda.
+fallido (FR-6). Saltar un objeto no produce salida y no cancela la ejecución.
 
 *Fundamento:* evita imprimir basura binaria y mantiene el alcance de la v1
 acotado a texto sin compresión. `Content-Type` no se usa porque sus metadatos
 pueden ser incorrectos.
 
 *Excepciones:* un byte NUL después de los primeros 8.192 bytes no hace saltear el
-objeto. Si ese objeto es UTF-8 válido, se procesa como texto. Trade-off aceptado:
+objeto. Si ese objeto es UTF-8 válido, se lee como texto. Trade-off aceptado:
 un texto codificado en UTF-16 contiene bytes NUL y se saltea como binario.
 
 > **VC-12** — Un objeto `.gz` y uno con un byte NUL en los primeros bytes, ambos
@@ -340,8 +385,9 @@ el bucket excede el alcance de la v1.
 momento de la lectura.
 
 > **VC-13** — Si la generación enumerada deja de estar disponible antes de
-> leerla, el objeto es un objeto fallido (FR-6): se informa por `stderr`, se
-> continúa con los demás objetos y el exit code es `2`.
+> leerla, `stderr` contiene una línea que empieza con
+> `gcsgrep: no se pudo leer gs://B/<nombre del objeto>:`, el objeto siguiente
+> produce su match en `stdout` y el exit code es `2`.
 
 ## Requerimientos no funcionales
 
@@ -349,7 +395,7 @@ momento de la lectura.
 
 **Condición de carga:** un único objeto de 128 MiB compuesto por líneas de hasta
 1 KiB. **Métrica:** RSS pico del proceso (`Maximum resident set size` de
-`/usr/bin/time -v`) menos el RSS pico de la misma corrida sobre un objeto de
+`/usr/bin/time -v`) menos el RSS pico de una ejecución igual sobre un objeto de
 0 bytes. **Umbral:** menor a 64 MiB.
 
 *Excepción:* una sola línea más larga que el umbral se retiene completa en
@@ -361,18 +407,23 @@ memoria, porque la unidad de match es la línea.
 ### NFR-2 — Reintentos de red
 
 Un error transitorio de lectura (timeout, conexión cortada, HTTP 429 o 5xx) se
-reintenta hasta 3 veces, es decir, hasta 4 intentos por tramo, con backoff
-exponencial: 1 s, 2 s y 4 s, el comportamiento por defecto de la librería oficial
-de GCS. El reintento vuelve a pedir el tramo en curso desde el mismo offset, así
-que no se reimprimen líneas ya emitidas. Al agotar los reintentos, el objeto es un
-objeto fallido (FR-6): sus líneas ya impresas quedan en `stdout`, se continúa con
-el resto y el exit code final es `2`.
+reintenta hasta 3 veces, es decir, hasta 4 intentos por tramo. Antes del segundo,
+tercer y cuarto intento se espera 1 s, 2 s y 4 s respectivamente (backoff
+exponencial sin aleatoriedad). El reintento vuelve a pedir el tramo en curso desde
+el mismo offset, así que no se reimprimen líneas ya emitidas. Al agotar los
+reintentos, el objeto es un objeto fallido, se aplica FR-6 y el exit code final es
+`2`.
 
-> **VC-15** — Un stream que falla dos veces y luego responde permite leer el
-> objeto completo: cada match aparece una sola vez, `stderr` no tiene error para
-> ese objeto y el exit code es `0`. Un stream que falla cuatro veces produce en
-> `stderr` `gcsgrep: no se pudo leer <URI>: ...`, el objeto siguiente se procesa y
-> el exit code es `2`.
+> **VC-15** — Con un objeto de 3 matches, cada uno en un tramo distinto, un
+> stream de prueba que falla con un timeout al pedir el tramo del segundo match,
+> y un reloj de prueba que registra cada espera:
+> (a) si falla dos veces y luego responde, `stdout` tiene exactamente 3 líneas,
+> sin repetidas, las esperas registradas son `[1 s, 2 s]`, `stderr` no tiene
+> error para ese objeto y el exit code es `0`; (b) si falla cuatro veces, las
+> esperas son `[1 s, 2 s, 4 s]`, `stdout` tiene solo el primer match de ese
+> objeto, `stderr` recibe una línea que empieza con
+> `gcsgrep: no se pudo leer <URI del objeto>:`, el objeto siguiente produce su
+> match y el exit code es `2`.
 
 ### NFR-3 — Scripting
 
@@ -389,13 +440,15 @@ Los resultados van a `stdout`. Los errores, los límites y el progreso van a
 sin matches, servido por el emulador local, en la misma máquina para ambas
 mediciones. **Métrica:** tiempo de pared de
 `gcsgrep patrón gs://B/obj` frente al de la alternativa que la herramienta
-reemplaza: descargar el objeto a disco con el cliente oficial
-(`blob.download_to_filename`) y luego correr `grep -F patrón`. **Umbral:** a lo
-sumo 1,5 veces el tiempo de la alternativa.
+reemplaza: descargar el objeto completo a un archivo local y luego correr
+`grep -F patrón` sobre ese archivo. **Umbral:** a lo sumo 1,5 veces el tiempo de
+la alternativa.
 
-> **VC-28** — Bajo la condición de carga de NFR-4, la mediana de 5 corridas de
-> `gcsgrep` no supera 1,5 veces la mediana de 5 corridas de descarga más
-> `grep -F`.
+> **VC-28** — Bajo la condición de carga de NFR-4, se mide el tiempo de pared con
+> `hyperfine --runs 5`. La alternativa corre como un único comando de shell: un
+> script que descarga el objeto con el cliente oficial de GCS
+> (`blob.download_to_filename`), seguido de `grep -F`. La mediana de `gcsgrep` no
+> supera 1,5 veces la mediana de la alternativa.
 
 ## Verificación de integración
 
@@ -411,7 +464,7 @@ reproducible en GCP real.
 |---|---|
 | FR-1 | VC-1 |
 | FR-2 | VC-2 |
-| FR-3 | VC-3, VC-17, VC-18 |
+| FR-3 | VC-3, VC-17, VC-18, VC-29 |
 | FR-4 | VC-4 |
 | FR-5 | VC-5 |
 | FR-6 | VC-6 |
@@ -425,6 +478,8 @@ reproducible en GCP real.
 | FR-14 | VC-24 |
 | FR-15 | VC-25 |
 | FR-16 | VC-26 |
+| FR-17 | VC-30 |
+| FR-18 | VC-31 |
 | BR-1 | VC-9 |
 | BR-2 | VC-10 |
 | BR-3 | VC-11, VC-27 |
@@ -435,21 +490,7 @@ reproducible en GCP real.
 | NFR-3 | VC-16 |
 | NFR-4 | VC-28 |
 
-**25 requerimientos, 28 VCs, 0 huérfanos.**
-
-## Cambios respecto de la versión anterior
-
-| Antes | Ahora | Motivo (hallazgo) |
-|---|---|---|
-| FR-1 (URI válido o inválido) | FR-1 (bucket), FR-2 (prefijo), FR-11 (URI inválido) | Atomicidad (2.3), Entonces observable (3.5), error solo en el VC (2.7) |
-| VC-1, parte inválida | VC-21 | Se movió con FR-11 |
-| FR-4 (con y sin `-n`) | FR-4 (sin `-n`), FR-9 (con `-n`) | Atomicidad (2.3), formato literal (2.8 p7) |
-| Exit `0` solo en el alcance | FR-10 | 2.8 p8 |
-| BR-3 sin forma de ajustar | BR-3 + FR-13, FR-14, FR-15 | 2.8 p6, 5.6 |
-| — | FR-12, FR-16 | Error de listado; orden de salida (2.8 p9) |
-| NFR-1 sin condición de carga | NFR-1 con carga, métrica RSS y herramienta | 4.1, 4.3 |
-| — | NFR-4 | 4.1 |
-| BRs sin Excepciones; BR-5 sin Fundamento | Agregados | 2.9 |
+**27 requerimientos, 31 VCs, 0 huérfanos.**
 
 ## Preguntas abiertas
 

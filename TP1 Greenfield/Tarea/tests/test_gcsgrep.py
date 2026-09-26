@@ -180,6 +180,16 @@ def test_vc17_crlf_terminator_is_not_part_of_the_line():
     assert stdout == "gs://B/obj:2:b timeout\n"
 
 
+# --- VC-29 / FR-3: patrón vacío ---------------------------------------------
+
+
+def test_vc29_empty_pattern_matches_every_line():
+    code, stdout, _ = run(["-n", "", "gs://B/edge/"], [FakeBlob("edge/nonl.log", b"a\nb timeout")])
+
+    assert code == 0
+    assert stdout == "gs://B/edge/nonl.log:1:a\ngs://B/edge/nonl.log:2:b timeout\n"
+
+
 # --- VC-18 / FR-3: objeto de 0 bytes -----------------------------------------
 
 
@@ -252,6 +262,16 @@ def test_vc6_failed_object_is_reported_and_scan_continues():
     assert "Traceback" not in stderr
 
 
+def test_vc6_lines_before_the_invalid_line_are_kept():
+    blobs = [FakeBlob("partial/mixed.log", b"timeout 1\ncaf\xe9 timeout 2\ntimeout 3\n")]
+
+    code, stdout, stderr = run(["-n", "timeout", "gs://B/partial/"], blobs)
+
+    assert code == 2
+    assert stdout == "gs://B/partial/mixed.log:1:timeout 1\n"
+    assert stderr.startswith("gcsgrep: no se pudo leer gs://B/partial/mixed.log:")
+
+
 def test_vc6_permission_error_on_open_is_a_failed_object():
     blobs = [
         FakeBlob("broken.log", b"", fail=OSError("permission denied")),
@@ -275,6 +295,14 @@ def test_vc7_no_match_returns_one_with_empty_stdout():
     assert stdout == ""
 
 
+def test_vc30_prefix_without_objects_returns_one():
+    code, stdout, stderr = run(["timeout", "gs://B/prefijo-sin-objetos/"], [])
+
+    assert code == 1
+    assert stdout == ""
+    assert stderr == ""
+
+
 # --- VC-8 / FR-8: progreso ---------------------------------------------------
 
 
@@ -285,7 +313,7 @@ def test_vc8_progress_line_every_hundred_objects():
 
     assert code == 1
     assert stdout == ""
-    assert stderr == "gcsgrep: objetos procesados: 100\n"
+    assert stderr == "gcsgrep: objetos inspeccionados: 100\n"
 
 
 def test_vc8_no_progress_line_below_hundred_objects():
@@ -293,7 +321,7 @@ def test_vc8_no_progress_line_below_hundred_objects():
 
     _, _, stderr = run(["timeout", "gs://logs/"], blobs)
 
-    assert "objetos procesados" not in stderr
+    assert "objetos inspeccionados" not in stderr
 
 
 # --- VC-20 / FR-10: exit 0 ---------------------------------------------------

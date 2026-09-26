@@ -58,7 +58,7 @@ echo $?
 
 ### Alcance
 
-- Reintentos explícitos y configurables para fallos transitorios.
+- Reintentos explícitos para fallos transitorios, según NFR-2 (3 reintentos con esperas de 1 s, 2 s y 4 s).
 - Lectura concurrente con `--jobs`, manteniendo límites globales.
 - Progreso configurable.
 - Verificación de generación del objeto cuando esté disponible.

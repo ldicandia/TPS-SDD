@@ -28,7 +28,12 @@ sin alterar cómo funciona `tmux` para quien no active la función.
 
 ## Alcance
 
-### Dentro (todo bajo `#ifdef ENABLE_SSH_PANE`)
+### Dentro (feature opcional, excluido de builds sin SSH)
+
+En C, las incorporaciones a archivos compartidos se protegen con
+`#ifdef ENABLE_SSH_PANE`; las fuentes nuevas se excluyen mediante `AM_CONDITIONAL`
+en `Makefile.am`. Las reglas de `configure.ac` son Autoconf, no código bajo un
+`#ifdef`: solo consultan y agregan libssh al activar `--enable-ssh`.
 
 | Archivo | Cambio |
 |---|---|
@@ -105,38 +110,201 @@ Explícito, por path y por capacidad:
 
 ## Invariantes
 
-Verdades que **no pueden cambiar**, con su forma de comprobarlas. Un invariante sin
-verificación no es un invariante.
+Obligaciones del cambio propuesto. Cada una tiene un VC explícito; la definición de
+la comprobación **no** implica que se haya ejecutado. Todos los diffs siguientes
+comparan con el commit base de **tmux**, no con el último commit de esta entrega.
 
-| # | Invariante | Cómo se comprueba |
+| # | Invariante | Verificación |
 |---|---|---|
-| **INV-1** | **Los builds no-Linux siguen compilando.** El feature se compila afuera: sin `--enable-ssh`, ningún `#include <libssh/…>` ni símbolo de `libssh` entra a la compilación | En macOS y FreeBSD: `sh autogen.sh && ./configure && make` termina con código 0 y `strings tmux \| grep -c libssh` da 0 (**`macos-26` de `.github/workflows/regress.yml` no se rompe**) |
-| **INV-2** | **`--enable-ssh` en no-Linux falla en `configure`, no en `make`** | En macOS: `./configure --enable-ssh` sale con código ≠ 0 y el mensaje contiene `only supported on Linux` |
-| **INV-3** | **Sin `--enable-ssh`, el binario es el mismo de antes.** Los archivos compartidos, preprocesados, son idénticos a la base | Para `spawn.c`, `window.c`, `cmd.c`: `gcc -E -P <flags de make> <archivo>` da el mismo hash antes y después del cambio (los marcadores se sustituyen por los flags y cada ruta indicada) |
-| **INV-4** | **Los comandos existentes no cambian** | `tmux list-commands` con la función apagada es idéntico byte a byte al de la base; con la función prendida, la única diferencia es la línea de `ssh-pane`. `git diff --stat` sobre `cmd-split-window.c`, `cmd-new-window.c`, `cmd-new-session.c`, `cmd-respawn-pane.c` está vacío |
-| **INV-5** | **El modelo de PTY/panes no cambia**: un pane local sigue naciendo de `fdforkpty` y sigue redimensionándose con `TIOCSWINSZ` | `git diff -U0 spawn.c window.c` → toda línea agregada o quitada cae dentro de un bloque `#ifdef ENABLE_SSH_PANE`; la suite `regress/` da lo mismo que en la línea de base |
-| **INV-6** | **El protocolo cliente/servidor no cambia** | `git diff --exit-code tmux-protocol.h` |
-| **INV-7** | **Un pane SSH conserva la interfaz fd + `bufferevent`**: no se modifican `window_pane_set_event` (`window.c:1673`), `window_pane_read_callback` (`window.c:1632`), `window_pane_key` (`window.c:2071`), `input_key_pane` (`input-keys.c:398`), `input_key_write` (`input-keys.c:414`) ni `window_pane_paste` (`window.c:2052`) | `git diff -U0 window.c input-keys.c` no toca esas funciones |
-| **INV-8** | **Los builds por default no ganan una dependencia** | `./configure` sin flags no invoca `pkg-config libssh`; `ldd tmux \| grep -c libssh` da 0 |
+| **INV-1** | Los builds no-Linux conservan el feature excluido y compilan con las dependencias originales, sin libssh | VC-19 |
+| **INV-2** | Pedir `--enable-ssh` en no-Linux falla en `configure`, antes de buscar libssh | VC-20 |
+| **INV-3** | Con SSH apagado, las incorporaciones a archivos C compartidos no alteran el código activo de la base | VC-21 |
+| **INV-4** | Los comandos existentes conservan nombres, aliases, flags, uso y comportamiento, también en Linux con SSH activado | VC-22 |
+| **INV-5** | Los panes locales conservan creación por `fdforkpty`, resize por `TIOCSWINSZ`, respawn y cierre; las ramas SSH no interceptan panes locales | VC-23 |
+| **INV-6** | El protocolo cliente/servidor conserva su definición | VC-24 |
+| **INV-7** | El pane SSH reutiliza fd + `bufferevent`, parser y entradas de teclado/pegado sin modificar sus funciones comunes | VC-25 |
+| **INV-8** | El build por defecto y `--disable-ssh` no consultan, compilan ni enlazan libssh | VC-26 |
+
+### Protocolo común de comparación
+
+Estos comandos son para quien implemente, en checkouts de tmux aislados,
+con el candidato registrado en Git (incluidas sus fuentes nuevas). **No se
+compiló tmux ni se ejecutaron regresiones en esta entrega.**
+
+```sh
+TP2_BASE=5e4b8cc39e635f8e2c4d9c95c205e987a618d50b
+git rev-parse "$TP2_BASE"           # debe imprimir ese hash completo
+git diff --check "$TP2_BASE"       # incluye cambios ya commiteados y el working tree
+```
+
+Se comparan tres variantes: **base** en ese hash, **candidato-off** con el cambio y
+SSH apagado, y **candidato-on** con `--enable-ssh`, este último únicamente en Linux.
+Antes de implementar se guarda la base por plataforma y configuración; después se
+repiten las mismas comprobaciones. Usar mismo SO/arquitectura, compilador y versión,
+dependencias, flags, locale y opciones de funcionalidades existentes en cada par.
+Cada registro identifica hash del candidato, configuración, comandos, exit codes y
+logs. Ejecutar binarios por su ruta en el checkout y sockets de prueba diferentes
+(`-L`), sin reutilizar un servidor de otra variante ni la sesión personal.
+
+Matriz mínima, sin agregar workflows de CI:
+
+| Plataforma | Comparaciones | Dependencias SSH |
+|---|---|---|
+| Linux | base frente a candidato-off por defecto y con `--disable-ssh`; base frente a candidato-on para panes locales | Off en entorno sin headers, biblioteca ni módulo pkg-config de libssh; on con libssh ≥ 0.9 |
+| macOS | base frente a candidato-off por defecto y con `--disable-ssh`; prueba negativa con `--enable-ssh` | Sin libssh |
+| FreeBSD | base frente a candidato-off por defecto y con `--disable-ssh`; prueba negativa con `--enable-ssh` | Sin libssh |
+| Linux con utempter | Repetir base/off/on con `--enable-utempter`, además del caso sin utempter | utempter instalado en este par; libssh solo en on |
+
+Las dependencias originales (libevent, curses y herramientas de Autotools/build) deben
+estar disponibles. Se usan `make` en Linux y GNU make (`gmake`) en macOS/FreeBSD.
+Para el par mínimo se desactivan utf8proc y jemalloc explícitamente en **ambas**
+variantes; la base macOS exige elegir esas opciones (`configure.ac:1033-1055`). El
+par utempter añade `--enable-utempter` a ambos lados. No se interpreta un error de
+prerrequisitos de la base como una regresión causada por SSH ni como un VC aprobado.
+
+### VCs de invariantes
+
+**VC-19 · INV-1:** en macOS y FreeBSD, base y candidato-off completan `autogen.sh`,
+`configure` y el build con exit code 0 usando las opciones anteriores. Candidato-off
+pasa además VC-26. La matriz macOS existente (`.github/workflows/regress.yml:34-37`)
+se conserva sin edits; no se afirma que un job haya pasado por leer ese archivo.
+
+**VC-20 · INV-2:** en ambos SO no-Linux, desde un checkout candidato limpio de builds
+anteriores, ejecutar `./configure --disable-utf8proc --disable-jemalloc --enable-ssh`
+y guardar stdout/stderr y exit code. Debe salir con código distinto de 0 y contener
+`only supported on Linux`, sin consultas a libssh en el registro de `pkg-config`
+definido en VC-26. Si falla por otra dependencia o llega a `make`, el VC no pasa.
+
+**VC-21 · INV-3:** revisar `git diff --function-context "$TP2_BASE" -- spawn.c window.c
+cmd.c server-fn.c tmux.h`: todas las incorporaciones específicas de SSH deben estar
+bajo `ENABLE_SSH_PANE`, incluyendo campos y prototipos. La rama alternativa conserva
+el código local original. Esto cubre también los archivos sincronizados con OpenBSD
+(`SYNCING.md:3-22`); no se refactoriza código común fuera del alcance.
+
+Para comprobar el efecto de las guardas, guardar los comandos reales de compilación
+de `make V=1` en base y candidato-off. En las cuatro unidades `spawn.c`, `window.c`,
+`cmd.c` y `server-fn.c`, repetir el mismo compilador y flags efectivos sustituyendo
+la compilación/archivo objeto por `-E -P` y un archivo de salida `.i`. Ejecutar desde
+la raíz de cada checkout con el mismo nombre relativo de fuente. Esas unidades
+incluyen `tmux.h`, por lo que también comprueban que sus nuevos campos se excluyan.
+Eliminar únicamente líneas vacías de ambos `.i` con `sed '/^[[:space:]]*$/d'`
+para no atribuir cambios a espacios de las directivas; conservar íntegro el resto.
+Comparar cada par normalizado con `cmp`: exit code 0 en los cuatro. Si aparecen
+diferencias por rutas/configuración del entorno, corregir el par y repetir; no
+eliminar declaraciones, literales o instrucciones para hacerlo pasar. No se exige
+identidad byte a byte del binario; la preservación de comportamiento se comprueba
+además con comandos y panes locales.
+
+**VC-22 · INV-4:** guardar `list-commands` de base/off/on con `LC_ALL=C`, binario del
+checkout, socket exclusivo y `-f /dev/null`. `cmp base.commands off.commands` sale 0.
+En on hay exactamente una fila `ssh-pane (sshp)` con el uso de FR-1; al quitar solo
+esa fila, `cmp base.commands on-existing.commands` sale 0. Revisar el diff de todos
+los `cmd-*.c` frente a `TP2_BASE`: la única incorporación permitida es el archivo
+nuevo `cmd-ssh-pane.c`; los archivos existentes no cambian. El registro/extern nuevo
+en `cmd.c` queda bajo la guarda de VC-21. El comportamiento se comprueba con los
+mismos scripts existentes de la línea de base, no solo con la lista de comandos.
+
+**VC-23 · INV-5:** comparar la suite existente según la línea de base, incluyendo
+`regress/pane-ops.sh`, `regress/window-ops.sh` y `regress/respawn-pane-control-lag.sh`
+(leídos en el commit base). En Linux se comprueban también panes **locales** en off
+y on, con y sin utempter: la incorporación de SSH no habilita un rechazo de respawn
+ni una ruta de resize/cierre SSH para esos panes.
+
+Además, en cada variante base/off/on, crear una sesión de prueba desconectada de
+80×24 con `/bin/sh`, hacer `split-window -v` y `new-window` con `/bin/sh`, y obtener los IDs de los
+panes mediante `-P -F '#{pane_id}'`. En esos panes locales:
+
+- `#{pane_pid}` es positivo y `#{pane_tty}` no está vacío. Escribir
+  `test -t 0 && test -t 1 && printf '\nTP2-PTY-OK\n'` mediante `send-keys`; aparece una
+  línea exacta `TP2-PTY-OK` en `capture-pane` dentro de 2 s.
+- En el pane original de la ventana dividida, guardar sus dimensiones y ejecutar
+  `resize-pane -t <pane> -y 8`; exigir que cambie su altura. Comparar `stty size` con
+  `display -p -t <pane> '#{pane_height} #{pane_width}'` del pane real, no con un tamaño
+  pedido que el layout podría limitar. Deben coincidir dentro de 2 s y el server sigue vivo.
+- `respawn-pane -k -t <pane> /bin/sh` sale 0 y el nuevo pane conserva PTY y PID positivo;
+  repetir el marcador anterior. Con `remain-on-exit on`, `exit 7` deja `pane_dead=1`
+  y `pane_dead_status=7` dentro de 2 s; ese pane local permite después `respawn-pane`.
+- `kill-pane` elimina el ID en `list-panes`, conservando otro pane local y el server
+  vivo. En Linux, una traza del server iniciada antes de las operaciones
+  (`strace -f -e trace=process,ioctl`) registra creación del hijo y `TIOCSWINSZ` exitoso
+  durante el resize. La lectura de `spawn.c:478` y `window.c:612` confirma que el
+  camino local sigue usando `fdforkpty` y el ioctl original.
+
+**VC-24 · INV-6:** `git diff --exit-code "$TP2_BASE" -- tmux-protocol.h` sale 0 y no
+muestra diferencias. Se compara contra la base aunque el cambio ya esté commiteado.
+
+**VC-25 · INV-7:** `git diff --exit-code "$TP2_BASE" -- input.c input-keys.c` sale 0.
+Leer `git diff --function-context "$TP2_BASE" -- window.c` y comparar las funciones
+completas con la base: firma y cuerpo sin cambios en `window_pane_set_event`
+(`window.c:1673`), `window_pane_read_callback` (`window.c:1632`), `window_pane_key`
+(`window.c:2071`) y `window_pane_paste` (`window.c:2052`). Son **0 funciones modificadas**
+en ese conjunto; teclado, pegado y parser ya están cubiertos por el diff de sus archivos.
+El contrato del transporte conserva un extremo del `socketpair` en `wp->fd`; la
+verificación end-to-end de ese bridge se realiza con VC-2, VC-7a y VC-7b, sin presentar
+la ausencia de diff como prueba de que SSH ya funcione.
+
+**VC-26 · INV-8:** en cada candidato-off de la matriz, ejecutar primero sin opción SSH
+y luego con `--disable-ssh`, en checkouts/builds independientes. Guardar:
+
+1. Una traza de las invocaciones de `pkg-config` durante `configure`, mediante un
+   wrapper de prueba que registre los argumentos y delegue al ejecutable real
+   (`PKG_CONFIG` apunta a ese wrapper solo durante la comprobación). Debe haber
+   **0 consultas a `libssh`**, aunque existan consultas a otras dependencias.
+2. `config.h`: `ENABLE_SSH_PANE` queda **sin definir**, no definido a 0. El registro
+   de `make V=1` contiene **0 compilaciones** de `cmd-ssh-pane.c`/`ssh-pane.c` y
+   **0 opciones de enlace** que agreguen libssh. VC-21 comprueba además los includes
+   transitivos; no alcanza buscar solamente `-lssh` en el comando de enlace.
+3. En binarios de prueba sin strip, `nm -u ./tmux` completa con exit code 0 y no
+   contiene símbolos importados cuyo nombre empiece por `ssh_` (admitiendo el prefijo
+   `_` de Mach-O). `ldd ./tmux` en Linux/FreeBSD u `otool -L ./tmux` en macOS también
+   completa con exit code 0 y contiene **0 dependencias libssh**.
+
+Si la herramienta de inspección falla, no se cuenta como ausencia de dependencia.
+No se usa `strings` como prueba de enlace ni se toma el exit code de `grep` sin
+coincidencias como fallo de compilación. El build on en Linux es el control positivo:
+`ENABLE_SSH_PANE` definido, las dos fuentes nuevas compiladas y enlace dinámico libssh
+visible. Estos chequeos definen resultados esperados; no son resultados medidos aquí.
 
 ## Línea de base de regresión
 
-Se mide **antes** de modificar el código de tmux. **No se midió en la entrega ni en la
-revisión de referencias del 2026-09-30**: no se ejecutaron compilaciones ni regresiones.
-Quien implemente tiene que fijarla como primer paso y registrar los resultados. La falta
-de `libssh` no impide por sí sola compilar el tmux base, que no depende de esa biblioteca.
+**Sin medir.** Los conteos de scripts y referencias provienen de lectura, no de ejecución.
+El siguiente protocolo se ejecuta primero en la base y luego por cada variante de la
+matriz; los logs/resultados se guardan fuera de `regress/logs` antes de repetir, porque
+el runner borra los logs previos (`regress/Makefile:27-29`).
 
-```bash
-sh autogen.sh && ./configure --enable-utf8proc && make     # ¿compila limpio?
-./tmux list-commands | sha256sum                           # firma de INV-4
-for f in regress/*.sh; do (cd regress && sh ../$f) ; done  # 172 scripts; guardar cuáles fallan en la base
+```sh
+# Desde la raíz de un checkout aislado; sin SSH en la base.
+TP2_MAKE=make                  # gmake en macOS y FreeBSD
+sh autogen.sh                  # exigir exit code 0 antes de continuar
+./configure --disable-utf8proc --disable-jemalloc  # exigir exit code 0
+"$TP2_MAKE" V=1                # exigir exit code 0; guardar salida de build
+LC_ALL=C ./tmux -L tp2-base-commands -f /dev/null list-commands > base.commands
+"$TP2_MAKE" -C regress         # guardar exit code, salida y logs de fallos
 ```
 
-La suite se ejecuta desde `regress/` (`.github/workflows/regress.yml:79-82`). En 155 de
-los 172 scripts aparece `TEST_TMUX=$(readlink -f ../tmux)`; por ejemplo,
-`regress/new-window-command.sh:8`. Los demás usan variantes o helpers, por lo que no se
-asume un encabezado idéntico para todos. Al cerrar la
-iteración, **el conjunto de scripts que fallan tiene que ser el mismo que en la base**.
+Para candidato-off se omite la opción SSH en una corrida y se agrega `--disable-ssh`
+en otra; para candidato-on se agrega `--enable-ssh`. En el par utempter se agrega
+`--enable-utempter` también a la base. Cambiar el nombre del socket y del archivo
+`base.commands` por la variante. Los comandos se ejecutan por pasos: si falla un
+prerrequisito, se registra y no se siguen interpretando salidas como comprobaciones válidas.
+
+El runner real es `regress/Makefile`: descubre los `.sh` (`regress/Makefile:1`), ejecuta
+cada uno con entorno limpio (`regress/Makefile:35-36`) y resume PASS/FAIL por exit code.
+Se contaron **172 scripts existentes** en la base; su manifiesto y los fixtures se
+conservan. En 155 scripts aparece `TEST_TMUX=$(readlink -f ../tmux)`, por ejemplo
+`regress/new-window-command.sh:8`; los demás usan variantes o helpers. El protocolo
+usa el runner, evitando reemplazar su entorno por un loop de `sh` diferente.
+
+Se registra resultado por script y plataforma/configuración. Para los scripts
+existentes, el conjunto de fallos del candidato debe ser un subconjunto del de la
+base (**0 fallos nuevos**); una mejora no invalida la comparación. Un fallo heredado,
+un script omitido o un prerrequisito ausente se declara con su límite de cobertura,
+no como un PASS. Si uno de los tres scripts locales exigidos por VC-23 no puede
+verificarse, ese VC no se marca aprobado. Los nuevos `regress/ssh-pane-*.sh` se
+registran aparte: solo ejecutan SSH en Linux con el feature activo y omiten explícitamente
+esos casos en off/no-Linux; sus omisiones no prueban el feature. Comparar también
+`git diff --name-status "$TP2_BASE" -- regress`: no se permite modificar o eliminar
+scripts/fixtures existentes para hacer pasar las pruebas.
 
 ## Requerimientos
 
@@ -144,7 +312,8 @@ Todo FR asume que `tmux` se compiló con `--enable-ssh` en Linux, salvo FR-9.
 
 ### Entorno de prueba común
 
-Salvo que un FR diga otra cosa, todos los VCs corren en este entorno:
+Salvo que un FR diga otra cosa, los VCs de FRs/BRs/NFRs corren en este entorno.
+Los VCs de invariantes usan la matriz y el protocolo definidos arriba:
 
 - Un `sshd` de usuario en `127.0.0.1:2222`, que acepta solo autenticación por clave pública
   para el usuario `probe` y cuya clave de host está en `~/.ssh/known_hosts` como

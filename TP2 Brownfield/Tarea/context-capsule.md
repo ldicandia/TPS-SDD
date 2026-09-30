@@ -48,7 +48,9 @@ El código nuevo **propuesto** va en la raíz (`cmd-ssh-pane.c`, `ssh-pane.c`), 
 
 La spec exige preservar los comandos existentes y el modelo de PTY/panes, excluir SSH
 de builds no-Linux y mantener `tmux-protocol.h` sin cambios. **Son obligaciones propuestas,
-no resultados medidos**; sus comprobaciones se revisarán al cerrar invariantes.
+no resultados medidos**. Cada INV tiene un VC explícito (VC-19 a VC-26): comparar
+contra el commit base, con variantes base/off/on y registros por plataforma. No se
+exige identidad binaria: se comparan guardas/preprocesado, comandos, enlace y panes locales.
 La matriz macOS está en `.github/workflows/regress.yml:34-37`; su ejecución no se verificó.
 La base macOS ya exige opciones explícitas de utf8proc y jemalloc (`configure.ac:1033-1055`).
 

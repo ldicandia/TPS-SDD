@@ -381,3 +381,21 @@ propiedad/cierre se centraliza en la spec. No se agrega implementación, hilos, 
 resolución DNS asíncrona ni nuevos jobs de CI. El mínimo libssh 0.9 es de **API**, no una
 recomendación de desplegar esa versión histórica. Build, regresión y rendimiento siguen
 sin ejecutar; los VCs de invariantes y el resto del plan requieren sus pasos posteriores.
+
+## Revisión documental de invariantes del paso 3 — 2026-09-30
+
+Se contrastaron los ocho invariantes con la base y los criterios de ejemplo. El
+protocolo de la spec incorpora VC-19 a VC-26: todos comparan contra el hash tmux
+fijado, cubren off/on y distinguen herramientas/flags por plataforma. Se corrigen
+el `configure` mínimo de macOS, la equivalencia binaria no justificada, los diffs
+contra un working tree que podría estar limpio y la inspección de enlace con `strings`.
+
+Se leyeron el runner `regress/Makefile`, sus logs y entorno, y los scripts reales
+`regress/pane-ops.sh`, `regress/window-ops.sh` y `regress/respawn-pane-control-lag.sh`.
+La baseline usa ese runner y conserva los scripts/fixtures existentes: exige cero
+fallos nuevos, en vez de rechazar una mejora porque cambie el conjunto de fallos.
+Las comprobaciones de panes locales incluyen PTY, resize, respawn, cierre y el par
+utempter. **No se ejecutaron** build, preprocesado, inspección de binarios, wrappers
+de pkg-config, regresiones ni esos escenarios de panes; son el protocolo verificable
+para una implementación posterior. Esta revisión no es un veredicto global de la spec:
+contratos del bridge y el resto de FRs/NFRs/VCs tienen sus pasos siguientes.

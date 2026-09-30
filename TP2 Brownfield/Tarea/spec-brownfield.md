@@ -2,9 +2,13 @@
 
 > Spec **brownfield**, construida sobre [`notas-exploracion.md`](./notas-exploracion.md).
 > **No hay implementación**: el entregable es el análisis y esta spec. Las referencias
-> `archivo:línea` son del commit base y están explicadas en las notas.
+> `archivo:línea` son del commit base y están explicadas en las notas. Los nombres
+> `SPAWN_SSH`, `ENABLE_SSH_PANE` y `cmd_ssh_pane_entry` son incorporaciones propuestas:
+> no existen en la base. Las llamadas a `libssh`/`event_new` son APIs externas propuestas,
+> no funciones descubiertas en tmux; su compatibilidad de versiones requiere validación.
 
-**Repo:** [`tmux/tmux`](https://github.com/tmux/tmux) · commit base `5e4b8cc` · **solo Linux**
+**Repo:** [`tmux/tmux`](https://github.com/tmux/tmux) · commit base
+`5e4b8cc39e635f8e2c4d9c95c205e987a618d50b` · **solo Linux**
 
 ## Propósito
 
@@ -29,15 +33,22 @@ sin alterar cómo funciona `tmux` para quien no active la función.
 | Archivo | Cambio |
 |---|---|
 | `configure.ac` | Opción `--enable-ssh` (default **off**), `PKG_CHECK_MODULES(LIBSSH, libssh >= 0.9)`, `AC_DEFINE(ENABLE_SSH_PANE)`, `AM_CONDITIONAL(ENABLE_SSH_PANE, …)`, y **aborta si el host no es Linux** (mirando `$host_os`, no `$PLATFORM`) |
-| `Makefile.am` | `if ENABLE_SSH_PANE` → `dist_tmux_SOURCES += cmd-ssh-pane.c ssh-pane.c` (patrón de `Makefile.am:252`) |
+| `Makefile.am` | `if ENABLE_SSH_PANE` → `dist_tmux_SOURCES += cmd-ssh-pane.c ssh-pane.c` (patrón de `Makefile.am:253-254`) |
 | `cmd-ssh-pane.c` (**nuevo**) | `cmd_ssh_pane_entry` y su `exec`: resuelve target y layout como `cmd_split_window_exec` y llama a `spawn_pane` con `SPAWN_SSH` |
 | `ssh-pane.c` (**nuevo**) | El *bridge*: sesión `libssh` no bloqueante, `socketpair`, integración con `libevent` |
 | `cmd.c` | `extern` y fila en `cmd_table`, ambas entre `#ifdef` |
 | `tmux.h` | `SPAWN_SSH 0x2000`, campos `ssh` en `struct spawn_context` y en `struct window_pane`, prototipos |
 | `spawn.c` | Una rama en `spawn_pane` que reemplaza `fdforkpty` (`spawn.c:478`) cuando `SPAWN_SSH`; y rechazo de `SPAWN_RESPAWN` sobre un pane SSH |
 | `window.c` | Rama en `window_pane_send_resize` (`window.c:597`) y liberación del bridge en `window_pane_destroy` (`window.c:1567`) |
-| `tmux.1` | Documentar `ssh-pane` (entre `.\"` de la sección de comandos) |
-| `regress/ssh-pane-*.sh` (**nuevos**) | Pruebas de los VCs, con un `sshd` de usuario en loopback |
+| `tmux.1` | Documentar `ssh-pane` con el formato mdoc usado por los comandos existentes |
+| `regress/ssh-pane-*.sh` (**nuevos; patrón de nombres propuesto**) | Pruebas de los VCs, con un `sshd` de usuario en loopback |
+
+**Evidencia que debe incorporarse al cerrar la superficie de cambio:** el resize base
+termina el server si falla el ioctl (`window.c:612-622`, `log.c:140-152`); `complete` registra
+utempter (`spawn.c:581`) y hay dos rutas de baja (`window.c:1581`, `server-fn.c:367`).
+Además, `remain-on-exit` conserva el pane sin llamar a su destructor (`server-fn.c:420`).
+Las notas explican estos límites; esta revisión de referencias no cierra todavía el
+contrato del bridge ni decide si hace falta ampliar la lista de archivos.
 
 ### Fuera de alcance
 
@@ -50,7 +61,9 @@ Explícito, por path y por capacidad:
   `compat/forkpty-*.c` y `compat.h`). `libssh` no es un reemplazo de portabilidad.
 - **`osdep-*.c`** — sin cambios.
 - **Los comandos existentes:** `cmd-split-window.c`, `cmd-new-window.c`,
-  `cmd-new-session.c`, `cmd-respawn-pane.c` no se editan. **No hay flag `-S` en ninguno.**
+  `cmd-new-session.c`, `cmd-respawn-pane.c` no se editan. **No se agrega ni se reutiliza un
+  flag para SSH.** `split-window` ya tiene `-S` para el estilo del borde
+  (`cmd-split-window.c:62-67`); no es una opción SSH.
 - **El modelo de PTY/panes:** `tty*.c`, `screen*.c`, `grid*.c`, `input.c`, `layout*.c`,
   `window-*.c` (modos), `server-client.c`, `tmux-protocol.h`.
 - **Autenticación por contraseña o por teclado interactivo**, y **agent forwarding**,
@@ -69,20 +82,21 @@ verificación no es un invariante.
 
 | # | Invariante | Cómo se comprueba |
 |---|---|---|
-| **INV-1** | **Los builds no-Linux siguen compilando.** El feature se compila afuera: sin `--enable-ssh`, ningún `#include <libssh/…>` ni símbolo de `libssh` entra a la compilación | En macOS y FreeBSD: `sh autogen.sh && ./configure && make` termina con código 0 y `strings tmux \| grep -c libssh` da 0 (**`macos-26` de `regress.yml` no se rompe**) |
+| **INV-1** | **Los builds no-Linux siguen compilando.** El feature se compila afuera: sin `--enable-ssh`, ningún `#include <libssh/…>` ni símbolo de `libssh` entra a la compilación | En macOS y FreeBSD: `sh autogen.sh && ./configure && make` termina con código 0 y `strings tmux \| grep -c libssh` da 0 (**`macos-26` de `.github/workflows/regress.yml` no se rompe**) |
 | **INV-2** | **`--enable-ssh` en no-Linux falla en `configure`, no en `make`** | En macOS: `./configure --enable-ssh` sale con código ≠ 0 y el mensaje contiene `only supported on Linux` |
-| **INV-3** | **Sin `--enable-ssh`, el binario es el mismo de antes.** Los archivos compartidos, preprocesados, son idénticos a la base | Para `spawn.c`, `window.c`, `cmd.c`: `gcc -E -P <flags de make> archivo.c` da el mismo hash antes y después del cambio |
+| **INV-3** | **Sin `--enable-ssh`, el binario es el mismo de antes.** Los archivos compartidos, preprocesados, son idénticos a la base | Para `spawn.c`, `window.c`, `cmd.c`: `gcc -E -P <flags de make> <archivo>` da el mismo hash antes y después del cambio (los marcadores se sustituyen por los flags y cada ruta indicada) |
 | **INV-4** | **Los comandos existentes no cambian** | `tmux list-commands` con la función apagada es idéntico byte a byte al de la base; con la función prendida, la única diferencia es la línea de `ssh-pane`. `git diff --stat` sobre `cmd-split-window.c`, `cmd-new-window.c`, `cmd-new-session.c`, `cmd-respawn-pane.c` está vacío |
 | **INV-5** | **El modelo de PTY/panes no cambia**: un pane local sigue naciendo de `fdforkpty` y sigue redimensionándose con `TIOCSWINSZ` | `git diff -U0 spawn.c window.c` → toda línea agregada o quitada cae dentro de un bloque `#ifdef ENABLE_SSH_PANE`; la suite `regress/` da lo mismo que en la línea de base |
 | **INV-6** | **El protocolo cliente/servidor no cambia** | `git diff --exit-code tmux-protocol.h` |
-| **INV-7** | **Un pane SSH sigue siendo un fd + un `bufferevent`**: `window_pane_set_event`, `window_pane_read_callback` y la escritura de teclas (`window.c:1673`, `1632`, `2064`) no se modifican | `git diff -U0 window.c` no toca esas tres funciones |
+| **INV-7** | **Un pane SSH conserva la interfaz fd + `bufferevent`**: no se modifican `window_pane_set_event` (`window.c:1673`), `window_pane_read_callback` (`window.c:1632`), `window_pane_key` (`window.c:2071`), `input_key_pane` (`input-keys.c:398`), `input_key_write` (`input-keys.c:414`) ni `window_pane_paste` (`window.c:2052`) | `git diff -U0 window.c input-keys.c` no toca esas funciones |
 | **INV-8** | **Los builds por default no ganan una dependencia** | `./configure` sin flags no invoca `pkg-config libssh`; `ldd tmux \| grep -c libssh` da 0 |
 
 ## Línea de base de regresión
 
-Se mide **antes** de tocar una línea. **En la exploración no pudo medirse** (el entorno no
-tiene `libevent`, `autoconf` ni `libssh`); quien implemente tiene que fijarla como primer
-paso y registrar los números.
+Se mide **antes** de modificar el código de tmux. **No se midió en la entrega ni en la
+revisión de referencias del 2026-09-30**: no se ejecutaron compilaciones ni regresiones.
+Quien implemente tiene que fijarla como primer paso y registrar los resultados. La falta
+de `libssh` no impide por sí sola compilar el tmux base, que no depende de esa biblioteca.
 
 ```bash
 sh autogen.sh && ./configure --enable-utf8proc && make     # ¿compila limpio?
@@ -90,8 +104,10 @@ sh autogen.sh && ./configure --enable-utf8proc && make     # ¿compila limpio?
 for f in regress/*.sh; do (cd regress && sh ../$f) ; done  # 172 scripts; guardar cuáles fallan en la base
 ```
 
-Cada script de `regress/` (p. ej. `regress/new-window-command.sh`) usa
-`TEST_TMUX=$(readlink -f ../tmux)`, por eso se corren desde `regress/`. Al cerrar la
+La suite se ejecuta desde `regress/` (`.github/workflows/regress.yml:79-82`). En 155 de
+los 172 scripts aparece `TEST_TMUX=$(readlink -f ../tmux)`; por ejemplo,
+`regress/new-window-command.sh:8`. Los demás usan variantes o helpers, por lo que no se
+asume un encabezado idéntico para todos. Al cerrar la
 iteración, **el conjunto de scripts que fallan tiene que ser el mismo que en la base**.
 
 ## Requerimientos
@@ -230,7 +246,8 @@ contiene la línea `1000` y su `wc -l` es ≥ 1000.
 **entonces** `stty size` en la shell remota imprime `30 100` en ≤ 2 s.
 
 **VC-8:** `send-keys 'stty size' Enter` tras el `resize-pane`, y `capture-pane -p` contiene
-`30 100`. (Sobre un socket `TIOCSWINSZ` falla; esta es la rama de `window.c:597`.)
+`30 100`. (La función de `window.c:597` llama `fatal` en `window.c:622` si falla el ioctl;
+la rama SSH debe evitar pasar un socket por ese camino de PTY.)
 
 ### FR-9 · Sin la función compilada, el comando no existe
 
@@ -360,7 +377,7 @@ una línea de SSH.
 | ¿Dónde engancha en el spawn? | En **`spawn_pane`**, junto a `SPAWN_EMPTY`, con `SPAWN_SSH` | Reutiliza layout, entorno y el hook `pane-created` |
 | ¿`libssh` u OpenSSH? | **`libssh` ≥ 0.9** | La consigna prohíbe el binario; OpenSSH no tiene biblioteca cliente |
 | ¿Event loop? | `socketpair` + `libssh` no bloqueante + `event_new` | Deja `wp->fd` como fd + `bufferevent` (INV-7) |
-| ¿Auth por claves o agent? | **Agent primero, luego `-i`**; sin contraseña. `SSH_AUTH_SOCK` se toma del entorno de la sesión (`environ_for_session`, `spawn.c:408`) | Sin TTY previo no hay dónde pedirla sin filtrarla. El entorno de la sesión sigue a `update-environment` (`options-table.c:1211`), así que el agent es el del cliente que se conectó y no uno viejo del arranque del server |
+| ¿Auth por claves o agent? | **Agent primero, luego `-i`**; sin contraseña. `SSH_AUTH_SOCK` se toma del entorno de la sesión (`environ_for_session`, `spawn.c:408`) | Se conserva el alcance sin prompts. `environ_for_session` (`environ.c:253-262`) combina el entorno global con el de la sesión; `update-environment` incluye `SSH_AUTH_SOCK` (`options-table.c:1211`) y se actualiza al adjuntar un cliente, según su configuración. No se asume que cada invocación del comando actualice el agent |
 | ¿Qué guarda saca a no-Linux? | **`--enable-ssh` opt-in** que falla en no-Linux, **más** `#ifdef ENABLE_SSH_PANE` | Es el patrón de `--enable-systemd`/`--enable-cgroups` |
 | ¿Se resuelve DNS sin bloquear? | **No.** Se documenta como limitación | `getaddrinfo` dentro de `ssh_connect` es bloqueante; por eso NFR-1 mide con IP literal |
 | ¿Se acepta un host desconocido? | **No** | Aceptar sin preguntar es un MITM; no hay TTY para preguntar |

@@ -2,7 +2,8 @@
 
 > Descubrimiento destilado de [`notas-exploracion.md`](./notas-exploracion.md) y
 > [`spec-brownfield.md`](./spec-brownfield.md) para la próxima tarea sobre `tmux`.
-> Commit base `5e4b8cc`. **Nada de esto se compiló ni se corrió**: ver "Sin medir".
+> Commit base `5e4b8cc39e635f8e2c4d9c95c205e987a618d50b`. Referencias revisadas el
+> 2026-09-30 en una copia sin modificaciones. **Sin compilación ni pruebas de ejecución**.
 
 ## Qué se especificó
 
@@ -15,50 +16,61 @@ Linux, opt-in (`--enable-ssh`). **No se implementó.**
 (`spawn.c:243`) → `fdforkpty` (`spawn.c:478`) → `window_pane_set_event` (`spawn.c:590` →
 `window.c:1673`) → `bufferevent` sobre `wp->fd`.
 
-**Un pane es un fd + un `bufferevent`, no un PTY.** Por eso un `socketpair` alcanza para
-todo el I/O.
+**La interfaz de I/O es un fd + un `bufferevent`.** El `socketpair` propuesto puede reutilizar
+el parser, pero resize, utempter y ciclo de vida conservan suposiciones de PTY/proceso.
+Teclado: `window_pane_key` (`window.c:2071`) → `input_key_pane` (`input-keys.c:398`);
+el pegado es otro camino (`window_pane_paste`, `window.c:2052`).
 
-## Las tres trampas
+## Las trampas
 
 1. **`window_pane_send_resize`** (`window.c:597`) usa `ioctl(TIOCSWINSZ)`: sobre un socket
-   falla sin ruido. Es el único punto del I/O que asume PTY.
+   si falla, llama `fatal` (`window.c:622`, `log.c:140-152`) y termina el server.
 2. **`PANE_STATUSREADY`**: sin él, `server_destroy_pane` retorna en `server-fn.c:382`. Un pane
-   sin proceso hijo tiene que recibir `wp->status` a mano.
-3. **`PLATFORM` se calcula al final de `configure.ac`** (~1011-1118), después de las
+   sin proceso hijo necesita un estado codificado como `waitpid` (`format.c:2293-2294`).
+3. **`PLATFORM` se calcula tarde** (`configure.ac:1008-1118`), después de las
    opciones `--enable-*`. La guarda de Linux tiene que mirar `$host_os`, como
    `--enable-static` (`configure.ac:84-97`).
+4. **utempter** recibe el fd en `spawn.c:581`, `window.c:1581` y `server-fn.c:367`.
+   **`remain-on-exit`** conserva el pane (`server-fn.c:420`): liberar el bridge solo en
+   `window_pane_destroy` no cubre el fin de sesión. La superficie se cerrará con esa evidencia.
 
 ## La guarda "solo Linux"
 
 Dos capas: `--enable-ssh` opt-in que aborta en no-Linux (patrón `--enable-systemd` /
-`--enable-cgroups`, `configure.ac:501-541`) **y** `#ifdef ENABLE_SSH_PANE` en todo el código
-compartido. El código nuevo va en la raíz (`cmd-ssh-pane.c`, `ssh-pane.c`), como sixel
-(`Makefile.am:252`), **no** en `compat/`.
+`--enable-cgroups`, `configure.ac:503-542`) **y** `#ifdef ENABLE_SSH_PANE` en todo el código
+compartido. El precedente systemd no trae rechazo por SO: SSH agrega su propia guarda.
+El código nuevo **propuesto** va en la raíz (`cmd-ssh-pane.c`, `ssh-pane.c`), como sixel
+(`Makefile.am:253-254`), **no** en `compat/`.
 
 ## Invariantes
 
-Sin el flag, `spawn.c`/`window.c`/`cmd.c` preprocesados son idénticos a la base; los comandos
-existentes no cambian (`list-commands` idéntico); `tmux-protocol.h` sin diff; el build de
-macOS (`regress.yml`, `macos-26`) no cambia.
+La spec exige preservar los comandos existentes y el modelo de PTY/panes, excluir SSH
+de builds no-Linux y mantener `tmux-protocol.h` sin cambios. **Son obligaciones propuestas,
+no resultados medidos**; sus comprobaciones se revisarán al cerrar invariantes.
+La matriz macOS está en `.github/workflows/regress.yml:34-37`; su ejecución no se verificó.
+La base macOS ya exige opciones explícitas de utf8proc y jemalloc (`configure.ac:1033-1055`).
 
 ## Descartado
 
 | Se descartó | Por qué |
 |---|---|
-| Flag `-S` en `split-window` | Cambia un comando existente |
-| `compat/ssh-pane.c` | `compat/` tapa agujeros de SO; esto es una feature |
-| Auth por contraseña | No hay TTY antes de que exista el pane |
+| Usar un flag de `split-window` para SSH | Cambia un comando existente; `-S` ya tiene otro uso |
+| Crear `compat/ssh-pane.c` (alternativa; no existe) | `compat/` tapa agujeros de SO; esto es una feature |
+| Auth por contraseña | Se mantiene el alcance sin prompts |
 | Aceptar hosts desconocidos | MITM; `known_hosts` es solo lectura |
 | OpenBSD | `pledge` del server (`server.c:207`) sin `inet`/`dns` |
 
 ## Sin medir
 
-La línea de base (`make`, `regress/*.sh`, 172 scripts) **no se corrió**: el entorno no tenía
-`libevent`, `autoconf` ni `libssh`. `getaddrinfo` bloqueante dentro de `ssh_connect` es
-conocimiento de la API de `libssh`, **no verificado en el código de `libssh`**.
+La línea de base (`make`, `regress/*.sh`, 172 scripts contados) **no se corrió**. En este
+paso se verificó código y documentación, no ejecución. El bloqueo DNS atribuido a
+`ssh_connect`, las APIs de `libssh`, su versión mínima/licencia y la compatibilidad de
+`event_new` requieren validación externa; tmux contempla libevent antiguo
+(`configure.ac:281-300`, `compat.h:30-40`).
 
 ## Sin explorar
 
-`input.c` (solo se asumió que consume un `bufferevent` genérico), el layout flotante
-(`layout_get_floating_cell`), control mode (`control_write_output` en
-`window_pane_read_callback`) y `window_pane_key`.
+No se auditó el parser completo, las reglas de layout, todo control mode ni toda la
+traducción de teclas. Sí se leyeron `input_init` (`input.c:875`), `input_parse_pane`
+(`input.c:1028`), los puntos de entrada de teclado/pegado y la llamada a
+`control_write_output` (`window.c:1653`, definición en `control.c:619`).

@@ -49,36 +49,172 @@ en `Makefile.am`. Las reglas de `configure.ac` son Autoconf, no código bajo un
 | `tmux.1` | Documentar `ssh-pane` con el formato mdoc usado por los comandos existentes |
 | `regress/ssh-pane-*.sh` (**nuevos; patrón de nombres propuesto**) | Pruebas de los VCs, con un `sshd` de usuario en loopback |
 
-### Contrato del transporte y del cierre
+### Contrato del bridge
 
-- `socketpair` no bloqueante: tmux posee y cierra el extremo `wp->fd`; el bridge posee
-  el otro extremo, canal/sesión libssh, buffers y eventos. No se entrega el socket TCP
-  SSH directamente al parser. La sesión libssh administra su socket de red.
-- El bridge observa `ssh_get_fd()` con `event_set`/`event_add`/`event_del` en el loop del
-  server; rearma lectura/escritura según `ssh_get_poll_flags()` y los resultados
-  `SSH_AGAIN`/`SSH_AUTH_AGAIN`; el procesamiento de paquetes con el poller público
-  de libssh (`ssh_event_dopoll`) usa timeout 0 dentro del callback. Usa timers compatibles (`evtimer_set`), sin un segundo
-  loop bloqueante ni hilos. Conserva las APIs que tmux usa (`server.c:424-426`), porque
-  su build contempla libevent 1.4 (`configure.ac:281-300`).
-- La rama de spawn conserva restauración de señales, `window_pane_set_event` y el hook
-  de `complete` (`spawn.c:589-592`). Fija `pid = -1` y `tty` vacío. No marca `PANE_EMPTY`
-  para evitar utempter: usa una identidad SSH propia, bajo `ENABLE_SSH_PANE`, que sigue
-  identificando al pane muerto después de liberar la sesión.
-- Resize envía `ssh_channel_change_pty_size` y nunca `TIOCSWINSZ` al socket
-  (`window.c:612-622`). Un respawn se rechaza antes de liberar evento/fd o reutilizar
-  el pane (`spawn.c:312-349`), tanto vivo como conservado por `remain-on-exit`.
-- El estado remoto llega por callback de libssh; no se usa el getter de exit status
-  que puede bloquear. Antes del EOF que recibe tmux, el bridge entrega la salida
-  pendiente y fija `wp->status` en formato de espera compatible con `WIFEXITED`/
-  `WEXITSTATUS` (`format.c:2293-2294`) y `PANE_STATUSREADY`. Un cierre sin estado remoto
-  se trata como error SSH con estado 255. El código remoto no se asigna crudo a `status`.
-- El cierre normal termina el transporte después de entregar la salida pendiente.
-  `server_destroy_pane` libera sus recursos antes de conservar un pane muerto
-  (`server-fn.c:420`); `window_pane_destroy` cubre además `kill-pane` y destrucción
-  forzada. Comparten una liberación idempotente: retirar eventos/timers antes de
-  liberar sus datos y cerrar cada fd una sola vez. Las tres llamadas de utempter
-  (`spawn.c:581`, `window.c:1581`, `server-fn.c:367`) quedan excluidas para panes SSH,
-  manteniendo el camino de PTY local.
+Los estados de abajo son **etiquetas conceptuales propuestas**, no enums ni funciones
+que existan en tmux. Un contexto pertenece a un único pane y se ejecuta únicamente
+en el loop del server; no hay hilos, workers ni reconexión.
+
+#### Creación y estados
+
+`spawn_pane` crea el pane y `socketpair`, copia host/puerto/usuario/ruta de identidad,
+`TERM` y dimensiones al contexto, y publica el pane con `pid = -1` y `tty` vacío.
+El `TERM` se toma del entorno construido por `environ_for_session(s, 0)`
+(`spawn.c:408`, `environ.c:264-269`); no se conserva un puntero al entorno que
+`complete` libera. Se restauran señales y se instalan evento/hook normalmente
+(`spawn.c:589-592`). La primera llamada SSH se difiere hasta después de retornar del
+spawn: DNS/archivos no se procesan con las señales bloqueadas ni dentro de ese hook.
+No se marca `PANE_EMPTY`; una identidad SSH independiente del transporte sobrevive
+al cierre, para excluir utempter y rechazar respawn incluso en un pane muerto.
+
+| Estado | Operación / salida |
+|---|---|
+| Creado | Recursos locales disponibles; programar avance diferido y deadline de apertura |
+| Conectando | Configuración explícita y `ssh_set_blocking(session, 0)` antes de `ssh_connect`; con `SSH_OK`, verificar host |
+| Verificando host | Solo una clave de host aceptada por la política de FR-6a/FR-6b permite autenticar |
+| Autenticando | Importar una vez la identidad de `-i` sin interacción; `ssh_userauth_publickey`; éxito permite abrir canal |
+| Abriendo canal | Crear un único canal `session` con `ssh_channel_open_session`; éxito permite pedir PTY |
+| Pidiendo PTY | `ssh_channel_request_pty_size` con `TERM` y tamaño real del pane; éxito permite pedir shell |
+| Pidiendo shell | `ssh_channel_request_shell`; éxito entra a Activo y cancela el deadline de apertura |
+| Activo | Transferencia bidireccional y resize; señales de fin llevan a Cerrando |
+| Cerrando | Detener entrada hacia el remoto, continuar salida y reunir EOF/CLOSE/exit status antes de publicar fin |
+| Finalizado | Transporte liberado; entregar EOF a tmux y dejar que aplique `remain-on-exit`; solo resta liberar la conexión local al destruir el pane |
+
+`SSH_AGAIN`/`SSH_AUTH_AGAIN` mantienen la operación pendiente y sus argumentos; se
+reanuda sin recrear sesión/canal ni volver a importar la clave. Se distinguen de
+éxito, rechazo y error. Cualquier error termina esa apertura: no se prueban passwords,
+agents, otro host ni identidades automáticas. Fallas de canal/PTY/shell son
+`ssh-pane: connection failed: ` seguido de la etapa y estado 255. Las fallas de host
+key y autenticación conservan los textos literales de sus FRs.
+
+El deadline de **10 s de NFR-2** se arma al publicar el pane y cubre apertura hasta
+Activo, incluyendo handshake, auth, canal, PTY y shell; no se reinicia con cada etapa
+ni con cada `AGAIN`. La garantía medible usa IP literal y archivos locales accesibles:
+DNS y filesystem siguen síncronos, como se declara en Decisiones. Kill cancela también
+una apertura pendiente, sin esperar ese deadline (FR-11b).
+
+Si fallan pane/layout/socketpair/contexto antes de publicar, se deshace lo creado y
+el comando devuelve 1 con `create pane failed: ` y la causa, como el contrato de
+spawn existente. Una vez publicado, el comando devuelve 0: las fallas posteriores
+son asíncronas dentro del pane. No se transfieren recursos al pane en dos pasos que
+permitan callbacks sobre un contexto a medio construir.
+
+#### Event loop e I/O
+
+Tmux posee y cierra el extremo `wp->fd`; el bridge posee el otro extremo del
+`socketpair`, sus dos colas, eventos/timers y sesión/poller libssh. El socket TCP
+es de libssh y nunca se entrega al parser ni se cierra directamente por número de fd.
+La clave importada se libera al terminar auth o al cancelar. El contexto conserva los
+callbacks de canal inicializados durante toda la vida del canal; no son variables
+locales de una función que retorna antes de que libssh los use.
+
+- Observar el fd válido de `ssh_get_fd()` con `event_set`/`event_add`/`event_del`,
+  como tmux (`server.c:424-426`); timers con `evtimer_set`, compatibles con la base
+  que admite libevent 1.4 (`configure.ac:281-300`). Registrar la sesión en el poller
+  libssh después de que su contexto de conexión exista; comprobar el resultado.
+  Si cambia el fd durante la apertura, retirar el evento anterior antes de registrarlo
+  sobre el nuevo fd. Una sesión por poller; no se reutiliza en otro pane.
+- Invocar `ssh_event_dopoll` solo con timeout **0**, rearme de lectura/escritura
+  según `ssh_get_poll_flags()` y la operación pendiente. No hay un segundo loop que
+  espere red. El evento de escritura del socket local solo se arma con salida
+  pendiente; no se vigila permanentemente un socket escribible.
+- Procesar como máximo **64 KiB de transferencia y 8 llamadas de avance/I/O por
+  callback propio**. Si queda trabajo que puede progresar sin esperar fd, diferir
+  una continuación al loop; si no hubo progreso, esperar fd/timer. `AGAIN`, 0 y
+  `EAGAIN` no justifican un bucle de reintentos ni una cadena de timers activos sin
+  progreso. El presupuesto no acota el coste interno de una llamada libssh; NFR-1
+  verifica la latencia observable, no una garantía inferida del nombre de la API.
+- Local → remoto: leer el extremo del bridge hasta el espacio disponible de su cola
+  de entrada; antes de Activo se conserva ahí sin enviar al canal. En Activo, usar
+  bloques de hasta **16 KiB**, limitados también por `ssh_channel_window_size` y la
+  cola disponible. Si la ventana remota es 0 o libssh tiene escritura de red pendiente,
+  esperar su avance antes de agregar otro bloque. Una escritura parcial retira solo
+  los bytes aceptados; 0 conserva la cola, error inicia cierre con estado 255.
+- Remoto → local: leer stdout y stderr alternadamente con
+  `ssh_channel_read_nonblocking`, hasta **16 KiB** por llamada y el espacio de la cola
+  de salida. Ambos se dibujan en el mismo pane; se conserva el orden dentro de cada
+  stream. Una shell con PTY normalmente ya entrega su salida combinada. **0 no es
+  EOF**: comprobar también callbacks/estado de canal; `SSH_EOF` no es un error de red.
+  Un CLOSE ya conocido con buffers vacíos termina el drenaje, sin interpretarlo
+  como una nueva pérdida de transporte. Escribir al socket local retira solo los
+  bytes efectivamente escritos; `EAGAIN`
+  conserva lo pendiente. No se sustituye el parser común ni las entradas de teclado.
+
+Las dos colas propias se limitan a **1 MiB cada una**, con pausa al llenarse y
+reanudación al bajar a **512 KiB** (NFR-4). Una cola de entrada llena detiene la
+lectura del socket local; una cola de salida llena detiene el avance de recepción
+SSH, incluido el poller, hasta poder drenar al pane. Los eventos/timers y otros panes
+siguen atendidos. La contrapresión también puede pausar temporalmente el envío SSH;
+es el trade-off de mantener un solo contexto/loop y colas acotadas.
+
+Esos límites **no** describen todos los buffers del proceso: libssh tiene buffers de
+paquetes/canal, el kernel tiene los de sockets y `wp->event->output` sigue siendo el
+buffer común de tmux. No se modifica `input_key_write` ni el pegado para prometer un
+límite global ante entrada arbitraria; NFR-3 conserva su medición de RSS en el escenario
+específico de salida remota. Se documenta este límite, sin atribuir al bridge una
+cota que no controla.
+
+Resize conserva solo el tamaño pendiente más reciente, tomado del pane real. Antes
+de pedir PTY se usa ese tamaño; si cambia mientras una solicitud está pendiente, se
+completa y luego se aplica el último tamaño. En Activo se envía
+`ssh_channel_change_pty_size`, sin `TIOCSWINSZ` sobre el socket (`window.c:612-622`);
+al cerrar se descarta lo pendiente. Respawn se rechaza antes de la mutación de
+`spawn.c:312-349`, con el literal de FR-12.
+
+#### Fin, drenaje y propiedad de recursos
+
+EOF SSH, CLOSE y exit status son señales distintas. Los callbacks solo guardan las
+señales/estado y solicitan avance diferido; **no liberan** canal, sesión, contexto ni
+pane mientras se ejecuta una llamada libssh que podría seguir usándolos. Recibir exit
+status no publica todavía `PANE_EXITED` ni descarta salida. En Cerrando se marca
+`PANE_INPUTOFF`, deshabilita escritura del `bufferevent` local y descarta las teclas
+pendientes que ya no tienen destino; la lectura/salida del pane continúa.
+
+Un fin normal requiere salida recibida drenada **y** (CLOSE remoto, o EOF remoto
+más exit status). Se lee también la salida que libssh conserva después de recibir
+CLOSE; sus callbacks no implican que el buffer esté vacío. Se retiene el primer exit
+status y se normaliza a los **8 bits** representables en `WEXITSTATUS`, con una
+codificación de espera de salida normal en `wp->status` (`format.c:2293-2294`). No se
+asigna crudo el código SSH. CLOSE sin status, exit-signal o fallo de transporte usan
+255; la v1 no traduce nombres de señales remotas a señales locales. Un fallo de
+transporte ya detectado no espera metadatos del remoto: agrega el diagnóstico de
+FR-14 y drena los datos que quedan en su cola propia. No garantiza recuperar datos
+que aún no recibió o que libssh ya descartó al fallar.
+
+Si solo llega EOF o status, después de drenar la salida ya disponible se espera la
+información restante por un máximo de **2 s**, con timer del mismo loop. Si no llega,
+se termina con estado 255 y `ssh-pane: connection failed: incomplete remote close`.
+La contrapresión de un consumidor local bloqueado conserva sus datos/colas y difiere
+ese plazo hasta poder drenarlos; no se promete un plazo de drenaje independiente del
+consumidor. Es un bloqueo de flujo explícito, cancelable por `kill-pane`, no una espera
+bloqueante de red dentro de un callback.
+
+Al completar el drenaje, se fija `PANE_STATUSREADY` y el estado antes del EOF local.
+Se intenta cerrar el canal en modo no bloqueante sin esperar confirmaciones; el fin
+de la conexión libera el transporte. Se usa `shutdown` de escritura en el extremo
+del bridge para que tmux reciba EOF **después** de la salida en el socket; ese extremo
+permanece vivo hasta que tmux cierre el pane. Así no se cierra completamente un socket
+con entrada sin leer, ni se obliga a `server_destroy_pane` a descartar la salida aún
+pendiente (`window.c:495-512`, `window.c:1660-1669`). Las entradas pendientes del usuario
+no se interpretan como comandos una vez iniciado el cierre.
+
+La liberación compartida es idempotente y cubre contextos parcialmente inicializados:
+
+1. Cancelar continuaciones, eventos de fd y timers antes de liberar sus datos; remover
+   callbacks del canal y separar la sesión de su poller mientras ambos existen.
+2. Liberar poller y clave importada si quedan; desconectar/liberar la sesión. Libssh
+   administra sus canales y socket; invalidar el puntero al canal al desconectar y
+   no ejecutar `ssh_channel_free` sobre un puntero que `ssh_disconnect` ya invalidó.
+3. Liberar colas y metadatos propios. El pequeño contexto/local fd que entrega EOF
+   se termina de liberar en `server_destroy_pane` o `window_pane_destroy`, sin volver
+   a liberar la sesión. Tmux libera su `bufferevent` y cierra `wp->fd` una sola vez.
+
+Con `remain-on-exit`, `server_destroy_pane` realiza esa baja **antes** de conservar el
+pane (`server-fn.c:420`). El pane muerto mantiene identidad SSH pero ningún transporte
+vivo. `window_pane_destroy` cubre además `kill-pane` en cualquier etapa: cancela y
+libera inmediatamente, sin drenar ni esperar al remoto; el pane fue eliminado por
+el usuario. Ambas rutas excluyen SSH de las tres operaciones utempter
+(`spawn.c:581`, `window.c:1581`, `server-fn.c:367`) y preservan el camino local.
 
 ### Fuera de alcance
 
@@ -454,10 +590,17 @@ la rama SSH debe evitar pasar un socket por ese camino de PTY.)
 **cuando** la shell remota termina con `exit 7`,
 **entonces** el pane queda muerto, `#{pane_dead}` da `1` y `#{pane_dead_status}` da `7`.
 
-**VC-10a:** después de `send-keys -t <pane> 'exit 7' Enter`, en ≤ 2 s
-`display -p -t <pane> '#{pane_dead} #{pane_dead_status}'` imprime `1 7`. Esto cierra el
-hallazgo de `server-fn.c:382`: el bridge tiene que fijar `wp->status` y `PANE_STATUSREADY`
-antes de cerrar su extremo del `socketpair`.
+**VC-10a:** en el fixture de FR-2, con el consumidor local activo, enviar
+`printf '\nTP2-CIERRE-%s\n' 7; exit 7` mediante `send-keys`. Dentro de 2 s,
+`display -p -t <pane> '#{pane_dead} #{pane_dead_status}'` imprime `1 7` y
+`capture-pane -p -t <pane>` conserva una línea exacta `TP2-CIERRE-7`. La marca no
+coincide con el eco del comando. Repetir 20 aperturas/cierres consecutivos en el
+mismo server: sin caída y sin fds de transporte acumulados tras cada cierre;
+comparar con el conteo estable de fds previo a abrir, con otros panes inactivos.
+Después de comprobar la baja de transporte **con el pane muerto aún presente**,
+eliminar ese pane y repetir desde el pane local original para no agotar el layout.
+Esto comprueba estado de salida, datos finales y baja con `remain-on-exit`; el
+bridge fija `status`/`PANE_STATUSREADY` antes del EOF local (`server-fn.c:382`).
 
 ### FR-10b · Fin de la sesión remota con `remain-on-exit off`: el pane se destruye
 
@@ -476,6 +619,21 @@ antes de cerrar su extremo del `socketpair`.
 **VC-11:** el conteo de `ls /proc/<pid del server>/fd \| wc -l` es el mismo antes de
 `ssh-pane` y después de `kill-pane` (±0); `ss -tn state established '( dport = :2222 )' \|
 wc -l` da `0`.
+
+### FR-11b · Cancelar una apertura pendiente libera sus recursos
+
+**Dado** un pane SSH conectándose a un listener de prueba en loopback que acepta TCP
+pero no envía el banner SSH, con otro pane local abierto,
+**cuando** se ejecuta `kill-pane -t <pane>` antes del deadline de apertura,
+**entonces** el pane se elimina y la conexión de esa apertura se cierra, sin esperar
+los 10 s ni ejecutar después callbacks sobre el pane eliminado.
+
+**VC-28:** el listener registra aceptación antes del kill. Dentro de 2 s, el ID ya no
+aparece en `list-panes`, no queda conexión establecida entre el server tmux y ese
+listener y los fds vuelven al conteo estable anterior. Esperar hasta 12 s desde la
+apertura y emitir `display-message`/`send-keys` al otro pane: ambos comandos salen 0,
+el server sigue vivo y no aparece ningún pane nuevo. Repetir 20 veces en el mismo
+server, con ASan, sin errores de memoria ni aumento acumulado de fds.
 
 ### FR-12 · `respawn-pane` sobre un pane SSH se rechaza
 
@@ -507,6 +665,21 @@ muerto con estado `255`.
 **VC-13b:** el texto y el estado son los de VC-13a. El tiempo lo mide VC-17 (NFR-2), así que
 este VC no fija otro umbral.
 
+### FR-14 · Pérdida de una conexión activa
+
+**Dado** un pane SSH abierto según FR-2 con `remain-on-exit on` y otro pane local,
+**cuando** el fixture corta abruptamente la conexión TCP de ese pane,
+**entonces** el pane muestra `ssh-pane: connection failed: transport lost`, queda
+muerto con estado 255 y el otro pane sigue atendido.
+
+**VC-29:** cortar únicamente el proceso de conexión del `sshd` aislado de prueba,
+identificado por su conexión y PID registrados por el fixture (no un `sshd` global).
+Con el consumidor local activo y sin salida pendiente, dentro de 2 s se captura la
+línea literal y `display -p -t <pane> '#{pane_dead} #{pane_dead_status}'` imprime
+`1 255`; un `send-keys` al otro pane se refleja en ≤ 100 ms. No quedan conexiones/fds
+de transporte de ese pane. Una partición de red silenciosa que no genera EOF/error
+no tiene detección acotada en esta v1: no se agregan keepalives/reconexión.
+
 ### BR-1 · `known_hosts` es solo lectura
 
 `tmux` nunca escribe en `known_hosts` ni en ningún archivo bajo `~/.ssh`.
@@ -528,10 +701,13 @@ Mientras una conexión SSH está en curso, los demás panes siguen atendidos.
 para excluir DNS), un `send-keys` a otro pane se refleja en `capture-pane` en **≤ 100 ms**,
 medido 20 veces.
 
-### NFR-2 · Timeout de conexión
+### NFR-2 · Timeout de apertura
 
-La conexión se abandona a los **10 s** si no hay respuesta. Es el único umbral de tiempo para
-un host que no responde; FR-13b lo referencia.
+La apertura se abandona a los **10 s** si no alcanzó el estado Activo (conexión,
+handshake, auth, canal, PTY y shell). El deadline empieza al publicar el pane y no
+se reinicia por etapa. La condición medible usa IP literal y archivos locales
+accesibles; no garantiza el tiempo de DNS/filesystem síncronos. FR-13b referencia
+este mismo plazo para un host que no responde.
 
 **VC-17:** en el escenario de FR-13b, el tiempo entre la ejecución de `ssh-pane` y el momento
 en que `#{pane_dead}` pasa a `1` está entre **10 y 12 s** (se consulta cada 100 ms).
@@ -548,13 +724,39 @@ comando tecleado). Se cumple si:
 (a) una línea igual a `FIN-18` aparece en `capture-pane -p` en **≤ 10 s**, es decir, 200 MiB / 10 s = 20 MiB/s;
 y (b) `VmHWM` de `/proc/<pid del server>/status` menos la `VmRSS` base es **≤ 32 MiB**.
 
+### NFR-4 · Colas propias del bridge acotadas
+
+La cola local → remoto y la cola remoto → local del bridge contienen **≤ 1 MiB cada
+una**, también con contrapresión; reanudan recepción al bajar a **≤ 512 KiB**.
+Son colas propias, no una cota sobre buffers internos de tmux/libssh ni sobre todo
+el RSS del server. La pausa conserva el contenido y las escrituras parciales no
+lo duplican; `kill-pane` cancela sin esperar al consumidor.
+
+**VC-27:** en el fixture de FR-2, ejecutar dos corridas separadas: bloquear durante
+1 s al consumidor de salida con un cliente control que no lee (patrón de
+`regress/respawn-pane-control-lag.sh`), con 8 MiB de salida remota; y detener durante
+1 s el consumo de entrada del PTY remoto, con 8 MiB de entrada al pane. Los logs de
+prueba `-vv` registran máximos `tx_bytes`/`rx_bytes` y transiciones `pause`/`resume`
+con dirección y bytes, calculados sobre las **longitudes reales** de ambas colas,
+sin contenido de datos/claves. Se exige máximo ≤ 1 MiB, pausa al llenar
+y reanudación solo a ≤ 512 KiB, en ambas direcciones. Después de reanudar, la salida
+incluye una marca final calculada que no coincide con el eco; el server sigue vivo.
+La entrada se verifica en un PTY remoto en modo no canónico y sin eco, con longitud
+y hash de los bytes recibidos iguales al payload enviado; no se confunde el límite
+de una línea del terminal con una pérdida del bridge. La prueba de RSS sigue siendo
+VC-18. Registrar la salida completa mediante `pipe-pane` hacia un archivo temporal
+del fixture y comparar longitud/hash del segmento de payload entre marcas, con
+postprocesamiento de salida del PTY desactivado para ese segmento. Una marca final
+sola no prueba ausencia de pérdidas o duplicados. Durante pausa/reanudación, repetir
+en el otro pane local el chequeo de latencia de NFR-1: ≤ 100 ms, 20 veces.
+
 ## Plan de iteraciones
 
 | Iteración | Alcance | Cierra |
 |---|---|---|
 | **1** | Guarda de build: `--enable-ssh`, `AM_CONDITIONAL`, `cmd-ssh-pane.c` vacío que registra el comando y responde "not implemented" | INV-1, INV-2, INV-3, INV-4, INV-8, FR-1, FR-9 |
-| **2** | Bridge: conexión, host key, auth, `socketpair`, enganche en `spawn_pane` | FR-2, FR-3, FR-4b, FR-5, FR-6a, FR-6b, FR-13a, FR-13b, BR-1, BR-2, NFR-1, NFR-2 |
-| **3** | I/O completo: resize, salida, destrucción, `respawn-pane` | FR-7a, FR-7b, FR-8, FR-10a, FR-10b, FR-11, FR-12, NFR-3, INV-5, INV-6, INV-7 |
+| **2** | Bridge: apertura, host key, auth, `socketpair`, enganche en `spawn_pane` y cierre/cancelación mínimos de recursos | FR-2, FR-3, FR-4b, FR-5, FR-6a, FR-6b, FR-11b, FR-13a, FR-13b, BR-1, BR-2, NFR-1, NFR-2 |
+| **3** | I/O completo: resize, salida, destrucción, `respawn-pane` | FR-7a, FR-7b, FR-8, FR-10a, FR-10b, FR-11, FR-12, FR-14, NFR-3, NFR-4, INV-5, INV-6, INV-7 |
 | **4** | Documentación y `regress/` | `tmux.1`, scripts `regress/ssh-pane-*.sh` |
 
 La Iteración 1 es el camino más angosto: cierra la promesa de compat **antes** de escribir

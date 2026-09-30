@@ -399,3 +399,50 @@ utempter. **No se ejecutaron** build, preprocesado, inspección de binarios, wra
 de pkg-config, regresiones ni esos escenarios de panes; son el protocolo verificable
 para una implementación posterior. Esta revisión no es un veredicto global de la spec:
 contratos del bridge y el resto de FRs/NFRs/VCs tienen sus pasos siguientes.
+
+## Contrato del bridge del paso 4 — 2026-09-30
+
+Se mantiene comando nuevo, Linux opt-in y transporte fd + `bufferevent`. La spec
+centraliza estados conceptuales, copia de parámetros/TERM, apertura diferida, I/O
+parcial, contrapresión, resize pendiente y cierre/cancelación. No son interfaces
+existentes de tmux ni una implementación entregada. Se precisó NFR-2 como un único
+deadline de apertura hasta shell activa; FR-11b cubre kill durante apertura, FR-14
+pérdida activa y NFR-4 las dos colas propias. No se agrega una cota global de buffers
+que la interfaz común de teclado/pegado no podría garantizar sin ampliar el alcance.
+
+Evidencia adicional de tmux: `environ.c:264-269` fija TERM a partir de default-terminal;
+`window.c:495-512` comprueba datos pendientes y `PANE_EXITED` antes de permitir
+la destrucción. `window.c:1660-1669` recibe EOF/error del fd y llama al cierre común.
+La contrapresión de clientes control puede deshabilitar la lectura del pane
+(`server-client.c:1978-1981`): esperar al consumidor conserva el comportamiento común,
+no equivale a esperar red dentro del callback SSH.
+
+Fuentes externas primarias: el mismo archivo libssh 0.9.0 registrado arriba y
+[RFC 4254, §5.3 y §6.10](https://www.rfc-editor.org/rfc/rfc4254.html).
+La [documentación de canales actual](https://api.libssh.org/stable/group__libssh__channel.html)
+es complemento; la comprobación de compatibilidad se hace contra 0.9.0, no contra
+su versión actual. Las siguientes rutas son **de libssh 0.9.0**:
+
+| Fuente leída | Hallazgo utilizado |
+|---|---|
+| `src/channels.c`, `ssh_channel_read_nonblocking` / `ssh_channel_is_eof` | 0 puede significar ausencia de datos; EOF se comprueba aparte y no se considera drenado mientras haya buffers de stdout/stderr |
+| `src/channels.c`, `channel_write_common` / `ssh_channel_window_size` | La escritura puede aceptar parte o 0 bytes; una ventana grande no prueba que el socket esté escribible. Se limitan bloques propios y se espera avance de red antes de seguir alimentando la biblioteca |
+| `src/channels.c`, `channel_rcv_close` / `channel_rcv_request` | CLOSE puede conservar datos en buffers; el callback de exit status es una señal independiente. No se libera al primer callback de fin |
+| `src/channels.c`, `ssh_channel_request_pty_size`, `ssh_channel_request_shell` | Las solicitudes conservan estado pendiente en modo no bloqueante; se repite la misma operación tras AGAIN sin recrear el canal |
+| `src/poll.c`, `ssh_event_add_session`, `ssh_event_dopoll`, `ssh_event_remove_session`, `ssh_event_free` | El poller se crea/registra con el contexto de conexión válido, se llama con timeout 0 y se separa de la sesión antes de liberar esta; no se usa una espera infinita |
+| `src/client.c`, `ssh_disconnect`; `src/session.c`, `ssh_free` | La desconexión administra socket/canales y los invalida. La spec evita close del fd TCP por fuera de libssh y un segundo free del canal tras desconectar |
+| `include/libssh/callbacks.h`, callbacks EOF/CLOSE/exit status/exit signal y `ssh_remove_channel_callbacks` | El contexto mantiene la estructura de callbacks viva; se retiran antes de liberarlo. Señales remotas sin exit status normal se representan como error 255 |
+
+La spec añade pruebas de datos finales/cierres repetidos a VC-10a, cancelación a
+VC-28, pérdida activa a VC-29 y colas a VC-27. Los datos recibidos en un cierre normal
+se drenan antes del EOF local; kill es cancelación explícita y puede descartarlos.
+Cierre sin metadatos completos tiene plazo de 2 s una vez drenada la salida; un
+consumidor local bloqueado difiere ese drenaje, con datos acotados en las colas propias
+y cancelación disponible. Una partición silenciosa de una sesión activa no tiene
+plazo de detección: no se agregan keepalives ni reconexión a esta v1.
+
+**Verificación realizada:** lectura de fuentes/protocolo y revisión de consistencia
+documental. **Sin ejecutar** sesiones SSH, fixtures de red/contrapresión, ASan,
+medición de RSS ni tests de estados. Los máximos/deadlines son requisitos propuestos,
+no mediciones. El siguiente paso sigue siendo cerrar los FRs/argumentos y sus fixtures;
+la revisión completa de VCs de rendimiento y del plan de iteraciones se hace después.

@@ -36,6 +36,16 @@ el pegado es otro camino (`window_pane_paste`, `window.c:2052`).
    con liberación idempotente y exclusión SSH de las tres llamadas utempter. La identidad
    SSH se conserva en el pane muerto para rechazar respawn antes de `spawn.c:312-349`.
 
+## Contrato del bridge
+
+Apertura → host key → clave `-i` → canal → PTY → shell → Activo → cierre/drenaje.
+Deadline de apertura: 10 s hasta Activo, sin reiniciar por etapa. Entrada previa a
+Activo se conserva; EOF, CLOSE y status se distinguen. Callbacks solo registran señales:
+la liberación se difiere. Dos colas propias de ≤ 1 MiB; reanudación a ≤ 512 KiB,
+sin prometer esa cota para buffers internos de tmux/libssh. Resize conserva el último
+tamaño real. Drenar salida antes de estado de pane/EOF local; kill cancela sin esperar red.
+No liberar un canal después de `ssh_disconnect`, que invalida sus punteros.
+
 ## La guarda "solo Linux"
 
 Dos capas: `--enable-ssh` opt-in que aborta en no-Linux (patrón `--enable-systemd` /

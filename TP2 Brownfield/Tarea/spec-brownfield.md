@@ -4,8 +4,9 @@
 > **No hay implementación**: el entregable es el análisis y esta spec. Las referencias
 > `archivo:línea` son del commit base y están explicadas en las notas. Los nombres
 > `SPAWN_SSH`, `ENABLE_SSH_PANE` y `cmd_ssh_pane_entry` son incorporaciones propuestas:
-> no existen en la base. Las llamadas a `libssh`/`event_new` son APIs externas propuestas,
-> no funciones descubiertas en tmux; su compatibilidad de versiones requiere validación.
+> no existen en la base. Las APIs externas se verificaron por lectura de los headers y
+> fuentes de libssh 0.9.0; no se compiló ni se probó un bridge SSH. Ver las notas para
+> fuentes, licencia y límites de esa verificación.
 
 **Repo:** [`tmux/tmux`](https://github.com/tmux/tmux) · commit base
 `5e4b8cc39e635f8e2c4d9c95c205e987a618d50b` · **solo Linux**
@@ -22,7 +23,6 @@ sin alterar cómo funciona `tmux` para quien no active la función.
 |---|---|
 | Usuario de `tmux` | Ejecuta `ssh-pane` desde un cliente, un binding o un script |
 | Servidor SSH remoto | Acepta la conexión, autentica y abre una shell |
-| `ssh-agent` | Provee las claves vía `SSH_AUTH_SOCK` |
 | Archivo `known_hosts` del usuario | Fuente de verdad de las claves de host; solo lectura |
 | Empaquetador / CI | Compila `tmux` en Linux, macOS y BSD; **los builds no-Linux no pueden romperse** |
 
@@ -32,23 +32,48 @@ sin alterar cómo funciona `tmux` para quien no active la función.
 
 | Archivo | Cambio |
 |---|---|
-| `configure.ac` | Opción `--enable-ssh` (default **off**), `PKG_CHECK_MODULES(LIBSSH, libssh >= 0.9)`, `AC_DEFINE(ENABLE_SSH_PANE)`, `AM_CONDITIONAL(ENABLE_SSH_PANE, …)`, y **aborta si el host no es Linux** (mirando `$host_os`, no `$PLATFORM`) |
+| `configure.ac` | Opción `--enable-ssh` (default **off**), `PKG_CHECK_MODULES(LIBSSH, libssh >= 0.9)` y propagación de sus CFLAGS/LIBS solo al activarlo, `AC_DEFINE(ENABLE_SSH_PANE)`, `AM_CONDITIONAL(ENABLE_SSH_PANE, …)`, y **aborta si el host no es Linux** (mirando `$host_os`, no `$PLATFORM`) |
 | `Makefile.am` | `if ENABLE_SSH_PANE` → `dist_tmux_SOURCES += cmd-ssh-pane.c ssh-pane.c` (patrón de `Makefile.am:253-254`) |
 | `cmd-ssh-pane.c` (**nuevo**) | `cmd_ssh_pane_entry` y su `exec`: resuelve target y layout como `cmd_split_window_exec` y llama a `spawn_pane` con `SPAWN_SSH` |
 | `ssh-pane.c` (**nuevo**) | El *bridge*: sesión `libssh` no bloqueante, `socketpair`, integración con `libevent` |
 | `cmd.c` | `extern` y fila en `cmd_table`, ambas entre `#ifdef` |
 | `tmux.h` | `SPAWN_SSH 0x2000`, campos `ssh` en `struct spawn_context` y en `struct window_pane`, prototipos |
-| `spawn.c` | Una rama en `spawn_pane` que reemplaza `fdforkpty` (`spawn.c:478`) cuando `SPAWN_SSH`; y rechazo de `SPAWN_RESPAWN` sobre un pane SSH |
-| `window.c` | Rama en `window_pane_send_resize` (`window.c:597`) y liberación del bridge en `window_pane_destroy` (`window.c:1567`) |
+| `spawn.c` | Rama SSH junto a `SPAWN_EMPTY` (`spawn.c:459`), sin `fdforkpty`; rechazo de respawn antes de `spawn.c:312-349`; exclusión SSH del alta utempter (`spawn.c:581`) |
+| `window.c` | Resize SSH sin ioctl de PTY (`window.c:597`); liberación idempotente en `window_pane_destroy` (`window.c:1567`) y exclusión SSH de utempter (`window.c:1581`) |
+| `server-fn.c` | Liberación del transporte en `server_destroy_pane` (`server-fn.c:354`), incluso con `remain-on-exit`; exclusión SSH de utempter (`server-fn.c:367`) |
 | `tmux.1` | Documentar `ssh-pane` con el formato mdoc usado por los comandos existentes |
 | `regress/ssh-pane-*.sh` (**nuevos; patrón de nombres propuesto**) | Pruebas de los VCs, con un `sshd` de usuario en loopback |
 
-**Evidencia que debe incorporarse al cerrar la superficie de cambio:** el resize base
-termina el server si falla el ioctl (`window.c:612-622`, `log.c:140-152`); `complete` registra
-utempter (`spawn.c:581`) y hay dos rutas de baja (`window.c:1581`, `server-fn.c:367`).
-Además, `remain-on-exit` conserva el pane sin llamar a su destructor (`server-fn.c:420`).
-Las notas explican estos límites; esta revisión de referencias no cierra todavía el
-contrato del bridge ni decide si hace falta ampliar la lista de archivos.
+### Contrato del transporte y del cierre
+
+- `socketpair` no bloqueante: tmux posee y cierra el extremo `wp->fd`; el bridge posee
+  el otro extremo, canal/sesión libssh, buffers y eventos. No se entrega el socket TCP
+  SSH directamente al parser. La sesión libssh administra su socket de red.
+- El bridge observa `ssh_get_fd()` con `event_set`/`event_add`/`event_del` en el loop del
+  server; rearma lectura/escritura según `ssh_get_poll_flags()` y los resultados
+  `SSH_AGAIN`/`SSH_AUTH_AGAIN`; el procesamiento de paquetes con el poller público
+  de libssh (`ssh_event_dopoll`) usa timeout 0 dentro del callback. Usa timers compatibles (`evtimer_set`), sin un segundo
+  loop bloqueante ni hilos. Conserva las APIs que tmux usa (`server.c:424-426`), porque
+  su build contempla libevent 1.4 (`configure.ac:281-300`).
+- La rama de spawn conserva restauración de señales, `window_pane_set_event` y el hook
+  de `complete` (`spawn.c:589-592`). Fija `pid = -1` y `tty` vacío. No marca `PANE_EMPTY`
+  para evitar utempter: usa una identidad SSH propia, bajo `ENABLE_SSH_PANE`, que sigue
+  identificando al pane muerto después de liberar la sesión.
+- Resize envía `ssh_channel_change_pty_size` y nunca `TIOCSWINSZ` al socket
+  (`window.c:612-622`). Un respawn se rechaza antes de liberar evento/fd o reutilizar
+  el pane (`spawn.c:312-349`), tanto vivo como conservado por `remain-on-exit`.
+- El estado remoto llega por callback de libssh; no se usa el getter de exit status
+  que puede bloquear. Antes del EOF que recibe tmux, el bridge entrega la salida
+  pendiente y fija `wp->status` en formato de espera compatible con `WIFEXITED`/
+  `WEXITSTATUS` (`format.c:2293-2294`) y `PANE_STATUSREADY`. Un cierre sin estado remoto
+  se trata como error SSH con estado 255. El código remoto no se asigna crudo a `status`.
+- El cierre normal termina el transporte después de entregar la salida pendiente.
+  `server_destroy_pane` libera sus recursos antes de conservar un pane muerto
+  (`server-fn.c:420`); `window_pane_destroy` cubre además `kill-pane` y destrucción
+  forzada. Comparten una liberación idempotente: retirar eventos/timers antes de
+  liberar sus datos y cerrar cada fd una sola vez. Las tres llamadas de utempter
+  (`spawn.c:581`, `window.c:1581`, `server-fn.c:367`) quedan excluidas para panes SSH,
+  manteniendo el camino de PTY local.
 
 ### Fuera de alcance
 
@@ -66,10 +91,13 @@ Explícito, por path y por capacidad:
   (`cmd-split-window.c:62-67`); no es una opción SSH.
 - **El modelo de PTY/panes:** `tty*.c`, `screen*.c`, `grid*.c`, `input.c`, `layout*.c`,
   `window-*.c` (modos), `server-client.c`, `tmux-protocol.h`.
-- **Autenticación por contraseña o por teclado interactivo**, y **agent forwarding**,
+- **Autenticación por agent, contraseña o teclado interactivo**, claves con frase y
+  búsqueda automática de identidades; también **agent forwarding**,
   **port forwarding**, **X11**, **SFTP/SCP**, **ProxyJump/ProxyCommand**, **ControlMaster**,
   **compresión** y **reconexión automática**.
-- **Lectura de `~/.ssh/config`** — los parámetros van por argumentos.
+- **Lectura de configuración SSH de usuario o sistema** — los parámetros van por
+  argumentos; se desactiva `SSH_OPTIONS_PROCESS_CONFIG` antes de conectar para evitar
+  la lectura automática de libssh, incluidos `ProxyCommand` y otras opciones externas.
 - **Escritura de `known_hosts`** — `tmux` no aprende hosts nuevos.
 - **`.github/workflows/`** — no se agrega un job de CI con `libssh`.
 - **Persistencia:** un pane SSH no sobrevive a `kill-server` ni a un reinicio; no hay
@@ -130,9 +158,14 @@ Salvo que un FR diga otra cosa, todos los VCs corren en este entorno:
   FR-6b, FR-13a, FR-13b).
 - Para poder observar un pane que termina, los FRs de falla fijan antes
   `tmux set -g remain-on-exit on` (el default es `off`, y con `off` el pane se destruye).
-- `SSH_AUTH_SOCK` se toma del entorno del pane nuevo (`environ_for_session`, `spawn.c:408`),
-  no del entorno con el que arrancó el server. `SSH_AUTH_SOCK` ya está en el default de
-  `update-environment` (`options-table.c:1211`).
+- La clave privada aceptada por el `sshd` está sin frase en `/ruta/K`, legible para el
+  server de prueba. Se carga únicamente la identidad indicada con `-i`; no se consulta
+  `SSH_AUTH_SOCK` ni se buscan claves por defecto. Sin `-i`, la autenticación falla
+  según FR-5, después de comprobar la clave del host.
+- La importación de `-i` usa una frase vacía explícita y un callback que rechaza
+  solicitudes de frase sin interacción; no se dejan los defaults de la biblioteca
+  que pueden pedirla por terminal. Una clave ilegible, inválida o que requiera frase
+  produce `ssh-pane: authentication failed` y estado 255, igual que FR-5.
 
 ### FR-1 · El comando existe y se lista
 
@@ -145,8 +178,8 @@ Salvo que un FR diga otra cosa, todos los VCs corren en este entorno:
 
 ### FR-2 · Abre un pane con una sesión remota
 
-**Dado** el entorno de prueba común, con la clave del usuario `probe` cargada en el agent,
-**cuando** se ejecuta `tmux ssh-pane -p 2222 -u probe 127.0.0.1`,
+**Dado** el entorno de prueba común, con la clave sin frase del usuario `probe` en `/ruta/K`,
+**cuando** se ejecuta `tmux ssh-pane -i /ruta/K -p 2222 -u probe 127.0.0.1`,
 **entonces** el comando sale con código `0`, el pane activo se divide, el pane nuevo muestra
 el prompt de la shell remota y `#{pane_dead}` vale `0`.
 
@@ -164,31 +197,20 @@ da `0`.
 **VC-3:** `pgrep -P $(tmux display -p '#{pid}') -x ssh | wc -l` da `0`; además `strace -f -e
 trace=execve -p <pid del server>` no registra ningún `execve` durante la apertura.
 
-### FR-4a · Autenticación con el agent
-
-**Dado** el entorno de prueba común, con un `sshd` que acepta solo la clave `K`, y `K` cargada
-en el agent de `SSH_AUTH_SOCK`,
-**cuando** se ejecuta `tmux ssh-pane -p 2222 -u probe 127.0.0.1` sin `-i`,
-**entonces** la autenticación tiene éxito y el pane muestra la shell remota.
-
-**VC-4a:** se cumple VC-2.
-
 ### FR-4b · Autenticación con clave en archivo
 
 **Dado** el entorno de prueba común, con un `sshd` que acepta solo la clave `K`,
-`SSH_AUTH_SOCK` sin definir en el entorno de la sesión y `K` sin frase en `/ruta/K`,
+`K` sin frase en `/ruta/K` y un `SSH_AUTH_SOCK` que apunta a un agent que no responde,
 **cuando** se ejecuta `tmux ssh-pane -i /ruta/K -p 2222 -u probe 127.0.0.1`,
-**entonces** la autenticación tiene éxito y el pane muestra la shell remota.
+**entonces** la autenticación tiene éxito y el pane muestra la shell remota sin consultar
+el agent.
 
-**VC-4b:** se cumple VC-2.
-
-El orden (primero el agent y después `-i`) es una decisión de diseño (ver "Decisiones") y no
-un FR aparte: el resultado que se observa es el mismo en ambos casos.
+**VC-4b:** se cumple VC-2; una traza de `connect` sobre el server tmux, iniciada antes
+del comando, no registra una conexión al socket de ese agent.
 
 ### FR-5 · Sin credenciales válidas, falla dentro del pane
 
-**Dado** el entorno de prueba común con `remain-on-exit on`, `SSH_AUTH_SOCK` sin definir en el
-entorno de la sesión y ninguna clave aceptada por el `sshd`,
+**Dado** el entorno de prueba común con `remain-on-exit on`,
 **cuando** se ejecuta `tmux ssh-pane -p 2222 -u probe 127.0.0.1` sin `-i`,
 **entonces** el comando sale con `0`, el pane muestra la línea literal
 `ssh-pane: authentication failed` y queda muerto con estado de salida `255`.
@@ -362,7 +384,7 @@ y (b) `VmHWM` de `/proc/<pid del server>/status` menos la `VmRSS` base es **≤ 
 | Iteración | Alcance | Cierra |
 |---|---|---|
 | **1** | Guarda de build: `--enable-ssh`, `AM_CONDITIONAL`, `cmd-ssh-pane.c` vacío que registra el comando y responde "not implemented" | INV-1, INV-2, INV-3, INV-4, INV-8, FR-1, FR-9 |
-| **2** | Bridge: conexión, host key, auth, `socketpair`, enganche en `spawn_pane` | FR-2, FR-3, FR-4a, FR-4b, FR-5, FR-6a, FR-6b, FR-13a, FR-13b, BR-1, BR-2, NFR-1, NFR-2 |
+| **2** | Bridge: conexión, host key, auth, `socketpair`, enganche en `spawn_pane` | FR-2, FR-3, FR-4b, FR-5, FR-6a, FR-6b, FR-13a, FR-13b, BR-1, BR-2, NFR-1, NFR-2 |
 | **3** | I/O completo: resize, salida, destrucción, `respawn-pane` | FR-7a, FR-7b, FR-8, FR-10a, FR-10b, FR-11, FR-12, NFR-3, INV-5, INV-6, INV-7 |
 | **4** | Documentación y `regress/` | `tmux.1`, scripts `regress/ssh-pane-*.sh` |
 
@@ -375,9 +397,9 @@ una línea de SSH.
 |---|---|---|
 | ¿Entrada nueva en la tabla de comandos? | **Sí**: `ssh-pane` | Un flag en `split-window` cambiaría un comando existente (INV-4) |
 | ¿Dónde engancha en el spawn? | En **`spawn_pane`**, junto a `SPAWN_EMPTY`, con `SPAWN_SSH` | Reutiliza layout, entorno y el hook `pane-created` |
-| ¿`libssh` u OpenSSH? | **`libssh` ≥ 0.9** | La consigna prohíbe el binario; OpenSSH no tiene biblioteca cliente |
-| ¿Event loop? | `socketpair` + `libssh` no bloqueante + `event_new` | Deja `wp->fd` como fd + `bufferevent` (INV-7) |
-| ¿Auth por claves o agent? | **Agent primero, luego `-i`**; sin contraseña. `SSH_AUTH_SOCK` se toma del entorno de la sesión (`environ_for_session`, `spawn.c:408`) | Se conserva el alcance sin prompts. `environ_for_session` (`environ.c:253-262`) combina el entorno global con el de la sesión; `update-environment` incluye `SSH_AUTH_SOCK` (`options-table.c:1211`) y se actualiza al adjuntar un cliente, según su configuración. No se asume que cada invocación del comando actualice el agent |
+| ¿`libssh` u OpenSSH? | **`libssh` ≥ 0.9**, enlace dinámico; LGPL-2.1-or-later | La consigna prohíbe invocar el binario. La API usada existe en 0.9.0 según sus headers; es una dependencia externa solo del build opt-in, siguiendo `configure.ac:512-514`. El mínimo de API no afirma que 0.9.0 sea una versión aconsejada para despliegue |
+| ¿Event loop? | `socketpair` + libssh no bloqueante + `event_set` | Reutiliza fd + `bufferevent` (INV-7) y el precedente `server.c:424-426`; descarta TCP crudo como fd del pane y un hilo aparte. Evita exigir libevent 2 para una base que admite 1.4 |
+| ¿Auth por claves o agent? | **Solo clave sin frase con `-i`**, sin prompts ni agent | Decisión confirmada en la revisión: la consigna permite elegir claves; el agent de libssh 0.9.0 hace esperas bloqueantes aun con la sesión no bloqueante. Evita ampliar la arquitectura con hilos/adaptadores; verifica el host antes de autenticar y usa `known_hosts` solo lectura |
 | ¿Qué guarda saca a no-Linux? | **`--enable-ssh` opt-in** que falla en no-Linux, **más** `#ifdef ENABLE_SSH_PANE` | Es el patrón de `--enable-systemd`/`--enable-cgroups` |
-| ¿Se resuelve DNS sin bloquear? | **No.** Se documenta como limitación | `getaddrinfo` dentro de `ssh_connect` es bloqueante; por eso NFR-1 mide con IP literal |
+| ¿Se resuelve DNS sin bloquear? | **No.** Se documenta como limitación | Confirmado en la fuente libssh 0.9.0: `getaddrinfo` se ejecuta antes de la conexión asíncrona; por eso NFR-1 mide con IP literal. La lectura de clave y `known_hosts` también es síncrona: no se promete latencia acotada de DNS o del filesystem |
 | ¿Se acepta un host desconocido? | **No** | Aceptar sin preguntar es un MITM; no hay TTY para preguntar |

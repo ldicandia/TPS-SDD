@@ -13,8 +13,9 @@
 > las reglas de build y el workflow; se comprobaron rutas, anclas y conteos. El checkout
 > de tmux quedó sin cambios. **No se ejecutaron `autogen.sh`, `configure`, `make`,
 > `regress/`, conexiones SSH ni pruebas de rendimiento.** La línea de base sigue **sin medir**.
-> Las APIs propuestas de `libssh`, su versión mínima y su licencia no se validaron contra
-> su fuente o sus headers en este paso; no son descubrimientos del código de tmux.
+> Las APIs y licencia externas se verificaron luego, por lectura de libssh 0.9.0
+> (apartado «Validación externa»). Esa evidencia se distingue de los hallazgos de tmux;
+> no se compiló ni se ejecutó la biblioteca.
 
 ## Qué se quiere lograr
 
@@ -23,7 +24,7 @@ biblioteca enlazada dentro del proceso `tmux` (`libssh`), **sin `fork`/`exec` de
 `ssh`**. Solo Linux.
 
 ```bash
-tmux ssh-pane -i ~/.ssh/id_ed25519 usuario@host     # split del pane actual, sesión remota adentro
+tmux ssh-pane -i ~/.ssh/id_ed25519 -u usuario host     # split del pane actual, sesión remota adentro
 ```
 
 ## El terreno: cómo nace hoy un pane
@@ -161,7 +162,8 @@ Hay otra diferencia: con `remain-on-exit on`, `server_destroy_pane` retorna en
 `server-fn.c:420` conservando el pane y sin llegar a `window_remove_pane`
 (`server-fn.c:429`). Liberar el bridge solo en `window_pane_destroy` no cubre ese fin de
 sesión. El cierre por `server_destroy_pane` también llama `utempter_remove_record`
-(`server-fn.c:367`), una segunda suposición de PTY que la superficie de cambio debe evaluar.
+(`server-fn.c:367`). Por esos dos hallazgos, la spec incorpora `server-fn.c` a la
+superficie y excluye SSH de las tres operaciones utempter.
 
 ### 6 · Formatos que asumen proceso y TTY
 
@@ -219,9 +221,9 @@ sus fuentes y su dependencia no se agregan.
 
 **Compatibilidad del event loop.** El build admite la búsqueda de `event-1.4`
 (`configure.ac:281-300`), y `compat.h:30-40` contempla headers `event2` o `event.h`.
-El código observado usa `event_set` (`server.c:424`); `event_new` es una API propuesta
-en la spec, no una función encontrada en tmux. Su compatibilidad con el build elegido
-debe cerrarse al revisar dependencias; no se validó aquí contra headers de libevent.
+El código observado usa `event_set` (`server.c:424`). La propuesta inicial `event_new`
+requiere libevent 2; se reemplaza por `event_set`/`event_add`/`event_del` para preservar
+la compatibilidad de esta base. La fuente externa de esa distinción se registra abajo.
 
 ### C · `compat/`: reemplazos, no features
 
@@ -280,9 +282,9 @@ opcional en un archivo compartido**, y la que hay que usar en `spawn.c`, `window
 |---|---|---|---|
 | ¿Comando nuevo o flag de uno existente? | **Comando nuevo `ssh-pane`** | Usar un flag de `split-window` / `new-window` para SSH | Cambiar `.args` y `.usage` de un comando existente (`cmd-split-window.c:62-67`) viola el invariante; `-S` ya existe en `split-window` para el estilo del borde, no para SSH |
 | ¿Dónde engancha en spawn? | Ramificar en **`spawn_pane`** con un flag nuevo `SPAWN_SSH` (`0x2000`), junto a la rama de `SPAWN_EMPTY` (`spawn.c:459`) | Función paralela que duplique la creación de pane | `spawn_pane` ya arma layout, entorno, `window_pane_set_event` y los hooks `pane-created`; duplicarlo diverge del upstream |
-| ¿`libssh` u OpenSSH? | **`libssh`** (≥ 0.9 propuesto, vía `pkg-config`) | Invocar `ssh` | La consigna prohíbe el binario; se conserva la biblioteca elegida. La compatibilidad de las APIs con 0.9 y la licencia LGPL-2.1 indicada en la entrega requieren validación externa, no se deducen del repo tmux |
-| ¿Cómo entra al event loop? | **`socketpair(AF_UNIX)`**: un extremo es `wp->fd`, el otro lo maneja el *bridge* con `libssh` en modo no bloqueante y `event_new` sobre `ssh_get_fd()` | `wp->fd` = socket TCP crudo; hilo aparte | Deja `window_pane_set_event`, `input_parse_pane` y las escrituras (**§4**) **sin cambios**; el pane sigue siendo "un fd + un `bufferevent`" |
-| ¿Auth? | **Agent** (`SSH_AUTH_SOCK`), luego **clave** con `-i` | Contraseña / interactivo por teclado | Se conserva el alcance sin prompts. El entorno del pane sale de `environ_for_session` (`spawn.c:408`, definición en `environ.c:253`); no se observó un flujo de prompts SSH en tmux |
+| ¿`libssh` u OpenSSH? | **`libssh` ≥ 0.9**, vía `pkg-config`, enlace dinámico | Invocar `ssh` | La consigna prohíbe el binario. API mínima y LGPL-2.1-or-later verificadas en la fuente externa; dependencia opcional según `configure.ac:512-514` |
+| ¿Cómo entra al event loop? | **`socketpair(AF_UNIX)`**: un extremo es `wp->fd`, el otro lo maneja el *bridge* con `libssh` en modo no bloqueante y `event_set` sobre `ssh_get_fd()` | `wp->fd` = socket TCP crudo; hilo aparte | Deja `window_pane_set_event`, `input_parse_pane` y las escrituras (**§4**) **sin cambios**; el pane sigue siendo "un fd + un `bufferevent`" |
+| ¿Auth? | **Solo clave sin frase con `-i`** | Agent, contraseña y teclado interactivo | La consigna permite claves o agent. La fuente externa confirma esperas bloqueantes del agent de 0.9.0; decisión del usuario: claves, para mantener una v1 simple. No cambia la construcción del entorno en `spawn.c:408` |
 | ¿Qué guarda deja afuera a no-Linux? | **Dos capas**: (1) `configure` con `--enable-ssh` opt-in que aborta en no-Linux; (2) `#ifdef ENABLE_SSH_PANE` en todo el código | Solo `#ifdef __linux__` | Reutiliza el patrón de dependencia opcional y agrega el rechazo por `host_os`. El objetivo es no introducir dependencias ni fallos por SSH en builds que no lo activan; aún debe verificarse al implementar |
 | ¿Dónde vive el código nuevo? | **Raíz**: `cmd-ssh-pane.c` y `ssh-pane.c` (**propuestos, nuevos**, patrón sixel) | Crear `compat/ssh-pane.c` (**alternativa descartada; no existe**) | `compat/` es para tapar agujeros de SO; esto es una feature con un comando y usa `struct window_pane` |
 
@@ -292,10 +294,10 @@ opcional en un archivo compartido**, y la que hay que usar en `spawn.c`, `window
 |---|---|
 | **Pane que nunca se destruye** | Sin `PANE_STATUSREADY`, `server_destroy_pane` retorna en `server-fn.c:382`. Hay que fijar `wp->status` y el flag al cerrarse el canal |
 | **Resize que termina el server** | El error de `TIOCSWINSZ` (`window.c:612`) llama `fatal` (`window.c:622`, `log.c:140-152`); la rama SSH debe evitar el ioctl de PTY |
-| **Bloqueo del event loop** | `window_pane_read_callback` (`window.c:1632`) y la aceptación de clientes (`server.c:424`) usan el loop del server. Una operación SSH bloqueante allí frenaría otros panes; el bloqueo DNS atribuido a `libssh` no se comprobó en su fuente |
+| **Bloqueo del event loop** | El loop del server atiende otros panes (`window.c:1632`, `server.c:424`). DNS y lectura de archivos siguen síncronos; se registran como limitaciones. Agent excluido y exit status por callback para evitar otras esperas verificadas en libssh |
 | **Fuga de fds/sesiones** | `window_pane_destroy` (`window.c:1567`) no conoce el bridge propuesto; además `server_destroy_pane` conserva el pane con `remain-on-exit` (`server-fn.c:420`), sin llamar al destructor |
 | **`respawn-pane` sobre un pane SSH** | `spawn.c:312-349` libera el evento/fd y reutiliza `wp0`; con `-k` continuaría al fork local. El rechazo SSH debe preceder esa mutación |
-| **Registro utempter sobre un socket** | El alta (`spawn.c:581`) y las bajas (`window.c:1581`, `server-fn.c:367`) reciben el fd sin reconocer un transporte SSH; hay que evaluar ambas rutas de cierre |
+| **Registro utempter sobre un socket** | El alta (`spawn.c:581`) y las bajas (`window.c:1581`, `server-fn.c:367`) reciben el fd sin reconocer un transporte SSH; la spec excluye SSH del alta y ambas bajas |
 | **Confianza en el host** | Riesgo de diseño SSH: aceptar hosts desconocidos permite suplantación. No es un mecanismo de SSH encontrado en tmux ni una prueba ejecutada |
 | **Conflictos de merge con OpenBSD** | `spawn.c`, `window.c`, `cmd.c` se sincronizan desde OpenBSD (`SYNCING.md`) |
 | **Romper builds sin SSH** | Las fuentes comunes se incluyen desde `Makefile.am`; CI tiene un build macOS sin SSH (`.github/workflows/regress.yml:34-37`). Un include de libssh no condicionado introduciría una dependencia nueva en ese build |
@@ -333,9 +335,12 @@ sed -n '3,6p;25,37p' .github/workflows/regress.yml      # disparadores y platafo
 git diff --exit-code                                 # código de la copia sin modificaciones
 ```
 
-## Registro de verificación de referencias — 2026-09-30
+## Registro de verificación de referencias del paso 1 — 2026-09-30
 
-| Chequeo | Resultado de esta revisión documental |
+Registro histórico del contenido consolidado en el commit `28cc9fd`, **antes** de
+los ajustes del paso 2. Sus conteos no describen las referencias agregadas después.
+
+| Chequeo | Resultado de esa revisión documental |
 |---|---|
 | Base | Checkout en el hash completo del encabezado; `git status --short` vacío y `git diff --exit-code` con salida 0 |
 | Rutas (M2) | 49 archivos concretos citados existen en tmux; los 9 patrones de archivos existentes tienen coincidencias. Las rutas de documentos locales también resuelven |
@@ -348,3 +353,31 @@ git diff --exit-code                                 # código de la copia sin m
 Se cuentan apariciones repetidas para M3 y se informa también la cantidad de anclas
 distintas. Los patrones, las rutas nuevas/descartadas, los headers externos y las rutas
 del repositorio externo de OpenBSD no se presentan como archivos concretos de esta copia.
+
+## Validación externa y cierre de decisiones del paso 2 — 2026-09-30
+
+Fuentes primarias: [archivo oficial de libssh 0.9.0](https://www.libssh.org/files/0.9/libssh-0.9.0.tar.xz),
+[guía de enlace de libssh](https://api.libssh.org/stable/libssh_linking.html) y
+[compatibilidad de eventos de libevent](https://libevent.org/libevent-book/Ref4_event.html#_obsolete_event_manipulation_functions).
+El archivo descargado tiene SHA-256
+`25303c2995e663cd169fdd902bae88106f48242d7e96311d74f812023482c7a5`.
+Se extrajo en una copia temporal y solo se leyeron fuentes y headers. Las rutas de la
+siguiente tabla pertenecen **a libssh 0.9.0, no a tmux**:
+
+| Evidencia externa | Resultado y consecuencia para la spec |
+|---|---|
+| `include/libssh/libssh.h`, declaraciones de opciones y funciones; `include/libssh/callbacks.h`, callbacks de canal | Existen las APIs elegidas: sesión no bloqueante, fd/poll flags, importación de clave, auth por clave, known hosts, PTY/shell, lectura no bloqueante, resize, poller con timeout y callback de exit status. Comprobar declaraciones no demuestra integración ni funcionamiento |
+| Cabecera de `include/libssh/libssh.h` y `COPYING` | LGPL 2.1 o posterior; se precisa LGPL-2.1-or-later y enlace dinámico. La distribución deberá cumplir sus condiciones; no se afirma que cambiar solo el nombre de licencia pruebe ese cumplimiento |
+| `src/agent.c`, `atomicio`, `agent_talk`; `src/auth.c`, `ssh_userauth_agent` | El agent usa lectura/escritura síncrona y ante `EAGAIN` espera con `ssh_poll(..., -1)`. `ssh_set_blocking(session, 0)` y un fd de agent no bloqueante no eliminan esa espera. Se descarta agent para la v1, por decisión explícita del usuario, en favor de `-i` |
+| `src/connect.c`, `getai` | `getaddrinfo` sigue siendo síncrono; para IP literal se usa `AI_NUMERICHOST`. Se conserva la limitación DNS y la prueba de event loop con IP literal; la lectura de archivos también queda fuera de esa garantía de latencia |
+| `src/client.c`, `ssh_connect`; `src/options.c`, opción `SSH_OPTIONS_PROCESS_CONFIG` | libssh procesa configuración automáticamente si no se desactiva. La spec exige desactivar esa opción antes de conectar, para respetar la exclusión de configuración SSH/ProxyCommand y no incorporar capacidades por defecto |
+| `src/pki_crypto.c`, `pki_private_key_from_base64`; `src/pki_container_openssh.c`, `pki_private_key_decrypt` | Importar con frase y callback nulos puede solicitar una frase por terminal. La spec exige importación sin interacción y fallo de autenticación para clave con frase, ilegible o inválida |
+| `src/channels.c`, `ssh_channel_get_exit_status` y su advertencia | El getter puede bloquear. Se elige el callback de exit status en el loop del server, sin esa llamada |
+
+No se exige una nueva versión de libevent: su documentación confirma que `event_new`
+no existe antes de 2.0 y describe `event_set`, ya usado por tmux. La superficie se amplía
+solo con `server-fn.c` para cubrir `remain-on-exit` y la baja utempter; el contrato de
+propiedad/cierre se centraliza en la spec. No se agrega implementación, hilos, workers,
+resolución DNS asíncrona ni nuevos jobs de CI. El mínimo libssh 0.9 es de **API**, no una
+recomendación de desplegar esa versión histórica. Build, regresión y rendimiento siguen
+sin ejecutar; los VCs de invariantes y el resto del plan requieren sus pasos posteriores.

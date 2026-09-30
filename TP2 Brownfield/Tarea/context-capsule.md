@@ -8,7 +8,7 @@
 ## Qué se especificó
 
 Comando `ssh-pane`: un pane con sesión SSH hablada por `libssh`, sin `exec` de `ssh`. Solo
-Linux, opt-in (`--enable-ssh`). **No se implementó.**
+Linux, opt-in (`--enable-ssh`). Clave sin frase con `-i`; sin agent. **No se implementó.**
 
 ## El mapa
 
@@ -32,7 +32,9 @@ el pegado es otro camino (`window_pane_paste`, `window.c:2052`).
    `--enable-static` (`configure.ac:84-97`).
 4. **utempter** recibe el fd en `spawn.c:581`, `window.c:1581` y `server-fn.c:367`.
    **`remain-on-exit`** conserva el pane (`server-fn.c:420`): liberar el bridge solo en
-   `window_pane_destroy` no cubre el fin de sesión. La superficie se cerrará con esa evidencia.
+   `window_pane_destroy` no cubre el fin de sesión: `server-fn.c` entra en el alcance,
+   con liberación idempotente y exclusión SSH de las tres llamadas utempter. La identidad
+   SSH se conserva en el pane muerto para rechazar respawn antes de `spawn.c:312-349`.
 
 ## La guarda "solo Linux"
 
@@ -62,11 +64,13 @@ La base macOS ya exige opciones explícitas de utf8proc y jemalloc (`configure.a
 
 ## Sin medir
 
-La línea de base (`make`, `regress/*.sh`, 172 scripts contados) **no se corrió**. En este
-paso se verificó código y documentación, no ejecución. El bloqueo DNS atribuido a
-`ssh_connect`, las APIs de `libssh`, su versión mínima/licencia y la compatibilidad de
-`event_new` requieren validación externa; tmux contempla libevent antiguo
-(`configure.ac:281-300`, `compat.h:30-40`).
+La línea de base (`make`, `regress/*.sh`, 172 scripts contados) **no se corrió**.
+API y LGPL-2.1-or-later verificadas por lectura de libssh 0.9.0; enlace dinámico propuesto.
+El agent de esa versión puede bloquear: se eligió `-i`. DNS y lectura de archivos
+siguen síncronos. Se desactiva `SSH_OPTIONS_PROCESS_CONFIG` para evitar configuración
+SSH automática y se obtiene exit status por callback. Fuentes externas en las notas.
+Se usa `event_set`, como tmux, porque el build admite libevent antiguo
+(`configure.ac:281-300`, `compat.h:30-40`). No se probó el bridge ni su rendimiento.
 
 ## Sin explorar
 

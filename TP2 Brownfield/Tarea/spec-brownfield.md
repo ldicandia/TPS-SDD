@@ -39,7 +39,7 @@ en `Makefile.am`. Las reglas de `configure.ac` son Autoconf, no código bajo un
 |---|---|
 | `configure.ac` | Opción `--enable-ssh` (default **off**), `PKG_CHECK_MODULES(LIBSSH, libssh >= 0.9)` y propagación de sus CFLAGS/LIBS solo al activarlo, `AC_DEFINE(ENABLE_SSH_PANE)`, `AM_CONDITIONAL(ENABLE_SSH_PANE, …)`, y **aborta si el host no es Linux** (mirando `$host_os`, no `$PLATFORM`) |
 | `Makefile.am` | `if ENABLE_SSH_PANE` → `dist_tmux_SOURCES += cmd-ssh-pane.c ssh-pane.c` (patrón de `Makefile.am:253-254`) |
-| `cmd-ssh-pane.c` (**nuevo**) | `cmd_ssh_pane_entry` y su `exec`: resuelve target y layout como `cmd_split_window_exec` y llama a `spawn_pane` con `SPAWN_SSH` |
+| `cmd-ssh-pane.c` (**nuevo**) | `cmd_ssh_pane_entry` y su `exec`: valida argumentos, resuelve target y layout como `cmd_split_window_exec`, filtra los argumentos de geometría y llama a `spawn_pane` con `SPAWN_SSH` |
 | `ssh-pane.c` (**nuevo**) | El *bridge*: sesión `libssh` no bloqueante, `socketpair`, integración con `libevent` |
 | `cmd.c` | `extern` y fila en `cmd_table`, ambas entre `#ifdef` |
 | `tmux.h` | `SPAWN_SSH 0x2000`, campos `ssh` en `struct spawn_context` y en `struct window_pane`, prototipos |
@@ -47,7 +47,7 @@ en `Makefile.am`. Las reglas de `configure.ac` son Autoconf, no código bajo un
 | `window.c` | Resize SSH sin ioctl de PTY (`window.c:597`); liberación idempotente en `window_pane_destroy` (`window.c:1567`) y exclusión SSH de utempter (`window.c:1581`) |
 | `server-fn.c` | Liberación del transporte en `server_destroy_pane` (`server-fn.c:354`), incluso con `remain-on-exit`; exclusión SSH de utempter (`server-fn.c:367`) |
 | `tmux.1` | Documentar `ssh-pane` con el formato mdoc usado por los comandos existentes |
-| `regress/ssh-pane-*.sh` (**nuevos; patrón de nombres propuesto**) | Pruebas de los VCs, con un `sshd` de usuario en loopback |
+| `regress/ssh-pane-*.sh` (**nuevos; patrón de nombres propuesto**) | Pruebas de los VCs, con un `sshd` aislado en loopback |
 
 ### Contrato del bridge
 
@@ -83,9 +83,9 @@ al cierre, para excluir utempter y rechazar respawn incluso en un pane muerto.
 `SSH_AGAIN`/`SSH_AUTH_AGAIN` mantienen la operación pendiente y sus argumentos; se
 reanuda sin recrear sesión/canal ni volver a importar la clave. Se distinguen de
 éxito, rechazo y error. Cualquier error termina esa apertura: no se prueban passwords,
-agents, otro host ni identidades automáticas. Fallas de canal/PTY/shell son
-`ssh-pane: connection failed: ` seguido de la etapa y estado 255. Las fallas de host
-key y autenticación conservan los textos literales de sus FRs.
+agents, otro host ni identidades automáticas. Fallas de canal/PTY/shell usan los
+literales de la tabla de diagnósticos y estado 255. Las fallas de host key y
+autenticación conservan los textos literales de sus FRs.
 
 El deadline de **10 s de NFR-2** se arma al publicar el pane y cubre apertura hasta
 Activo, incluyendo handshake, auth, canal, PTY y shell; no se reinicia con cada etapa
@@ -445,32 +445,148 @@ scripts/fixtures existentes para hacer pasar las pruebas.
 ## Requerimientos
 
 Todo FR asume que `tmux` se compiló con `--enable-ssh` en Linux, salvo FR-9.
+Los contratos siguientes son requisitos propuestos; ningún VC de ejecución se declara aprobado.
+
+### Contrato de argumentos y diagnósticos
+
+Uso: `ssh-pane [-bdhPv] [-i identity] [-l size] [-p port] [-t target-pane] [-u user] host`.
+Alias: `sshp`. Hay **exactamente un** argumento posicional, host; no hay comando
+remoto posicional. Las opciones van antes del host; `--` termina el parseo de opciones.
+El parser común se conserva (`arguments.c:208-282`, `cmd.c:527-537`); la entrada
+propuesta declara mínimo y máximo 1. Opciones con valor repetidas usan el último
+valor, como `args_get` (`arguments.c:687-699`); repetir un booleano es idempotente.
+
+| Argumento | Semántica y validación |
+|---|---|
+| `host` | Nombre para resolver, IPv4 o IPv6 sin corchetes. Se rechazan vacío, espacios/caracteres de control, prefijo `-`, `@`, `/` y corchetes. Si contiene `:`, debe ser una IPv6 válida con `inet_pton`, sin zona; no se acepta `host:port`. No se interpretan URI, `user@host`, alias de ssh_config ni formatos tmux; no se hace conversión IDN. Un nombre que no resuelve falla luego como conexión |
+| `-p port` | Puerto decimal de 1 a 65535; default 22. Solo dígitos ASCII, sin signo ni espacios. Validar **antes** de convertir/pasar a libssh: su opción PORT en 0.9.0 enmascara a 16 bits y no rechaza todos los valores fuera de rango |
+| `-u user` | Usuario remoto no vacío, sin espacios ni caracteres de control; default nombre de la cuenta local del **server**, obtenido de su UID, sin depender de `$USER` del cliente. No se ejecuta ni se expande como shell/formato |
+| `-i identity` | Ruta no vacía a una única clave sin frase. Absoluta o relativa al cwd efectivo de creación del pane, calculado como en `spawn.c:292-306` con `server_client_get_cwd` (`server-client.c:2926-2941`). Se copia como ruta absoluta antes de abrir; no se expande `~`, variables ni formatos. El shell que invoca tmux puede haber expandido su propio `~` antes. Una ruta válida pero ilegible/inválida/con frase falla **asíncronamente**, después de verificar el host; sin `-i` pasa lo mismo. No se buscan otras identidades |
+| `-t target-pane` | Target común `CMD_FIND_PANE`, como `cmd-split-window.c:69`; default pane del contexto tmux. El error de target es el del resolver común y ocurre antes de crear recursos SSH |
+| `-h`, `-v` | Izquierda/derecha y arriba/abajo respectivamente; default vertical. Son mutuamente excluyentes en este comando nuevo |
+| `-b` | Crear antes del target: izquierda con `-h`, arriba con vertical |
+| `-l size` | Reutiliza la geometría de `layout_get_tiled_cell` (`layout.c:1640-1700`): celdas o porcentaje, incluido el formato que expande ese helper. Sin `-l`, tamaño elegido por el layout común. La gramática/rangos/clamp son los de esa base (`arguments.c:998-1037`, `arguments.c:1067-1108`), no una promesa de tamaño exacto si no cabe |
+| `-d` | Conserva el pane activo; sin `-d`, activa el nuevo pane, como el split común |
+| `-P` | Imprime una sola línea `#{session_name}:#{window_index}.#{pane_index}` para el nuevo pane, como el template base (`cmd-split-window.c:33`, `cmd-split-window.c:306-310`). Sin `-P`, no imprime resultado de éxito. No implica esperar autenticación; no se agrega `-F` |
+
+**Separación obligatoria de geometría:** `layout_get_tiled_cell` interpreta `-p`
+como porcentaje (`layout.c:1658-1680`). No se le pasa el objeto completo de argumentos
+SSH. El comando nuevo construye/libera un objeto de argumentos de layout que conserva
+solo `-l`; dirección/posición se pasan con los flags de spawn. Puerto, identidad,
+usuario y host quedan en el contexto SSH. No se modifica el helper ni el significado
+de `-p` en `split-window`. La representación de la base puede aceptar porcentajes
+mayores que 100; se preserva ese comportamiento del layout, sin reutilizarlo para puerto.
+
+La validación específica antecede cualquier mutación de layout. Los errores del
+parser/resolver se conservan. Los nuevos errores semánticos devuelven 1 por stderr
+al cliente de comandos, con uno de estos literales: `ssh-pane: invalid host`,
+`ssh-pane: invalid port`, `ssh-pane: invalid user`, `ssh-pane: invalid identity path`,
+`ssh-pane: -h and -v are mutually exclusive`. No se imprime `-P` ni queda un pane
+nuevo en esos casos. El layout conserva `invalid tiled geometry <causa>`,
+`no space for a new pane` y `can't split a floating pane`; un fallo del spawn conserva
+`create pane failed: <causa>`. La falta de memoria que las rutinas comunes tratan
+como fatal no se convierte artificialmente en un error recuperable del comando.
+
+Una vez publicado el pane, el comando sale 0 y los fallos SSH son **líneas dentro
+del pane**, con status 255. Los textos son estables, sin incluir mensajes libres
+que la biblioteca pueda cambiar:
+
+| Etapa / motivo | Línea literal |
+|---|---|
+| Configuración de sesión o creación de recursos libssh | `ssh-pane: connection failed: setup` |
+| Conexión/handshake, incluida resolución fallida | `ssh-pane: connection failed: connect` |
+| Host no conocido/cambiado, archivo ausente/ilegible o error de verificación | `ssh-pane: host key verification failed` |
+| Sin identidad, importación fallida o rechazo de clave | `ssh-pane: authentication failed` |
+| Apertura de canal, solicitud de PTY o shell rechazada | `ssh-pane: connection failed: channel`, `ssh-pane: connection failed: pty` o `ssh-pane: connection failed: shell`, respectivamente |
+| Deadline de apertura agotado | `ssh-pane: connection failed: opening timeout` |
+| Transporte perdido en Activo / cierre incompleto | Los literales de FR-14 / del contrato de cierre |
+
+La verificación usa `ssh_session_is_known_server` y acepta solo `SSH_KNOWN_HOSTS_OK`.
+La fuente de confianza de esta v1 es exclusivamente el `~/.ssh/known_hosts` de la
+cuenta del server (home de su UID en la base de cuentas, no un `$HOME` arbitrario).
+Se configura `SSH_OPTIONS_GLOBAL_KNOWNHOSTS` a `/dev/null` y
+`SSH_OPTIONS_STRICTHOSTKEYCHECK` a verdadero: 0.9.0 puede consultar el archivo global
+y aceptar una coincidencia allí aun si el archivo de usuario no coincide. Se mantiene
+`SSH_OPTIONS_PROCESS_CONFIG` desactivado antes de conectar. No se usa una API que solo
+compruebe si existe alguna entrada, ni se actualiza/escribe el archivo. Importar `-i`
+usa frase vacía explícita y callback que rechaza solicitudes sin interacción.
 
 ### Entorno de prueba común
 
-Salvo que un FR diga otra cosa, los VCs de FRs/BRs/NFRs corren en este entorno.
-Los VCs de invariantes usan la matriz y el protocolo definidos arriba:
+Es un **protocolo para una implementación posterior**, sin scripts ejecutados en esta
+entrega. Los VCs de invariantes usan la matriz anterior; los de SSH usan Linux on.
+No se prueba contra servicios ni archivos SSH personales.
 
-- Un `sshd` de usuario en `127.0.0.1:2222`, que acepta solo autenticación por clave pública
-  para el usuario `probe` y cuya clave de host está en `~/.ssh/known_hosts` como
-  `[127.0.0.1]:2222`.
-- Un server `tmux` de prueba (`tmux -L ssh-test -f /dev/null`) con una sesión y un solo pane.
-- `<pane>` es el pane que crea `ssh-pane`. Como en `split-window`, pasa a ser el pane activo
-  (salvo `-d`), así que se obtiene con `tmux display -p '#{pane_id}'` justo después.
-- **`ssh-pane` devuelve `0` en cuanto crea el pane.** La conexión, la verificación de la clave
-  de host y la autenticación ocurren después, de forma asíncrona. Por eso un fallo de SSH
-  nunca cambia el código de salida del comando: se reporta **dentro del pane** (FR-5, FR-6a,
-  FR-6b, FR-13a, FR-13b).
-- Para poder observar un pane que termina, los FRs de falla fijan antes
-  `tmux set -g remain-on-exit on` (el default es `off`, y con `off` el pane se destruye).
-- La clave privada aceptada por el `sshd` está sin frase en `/ruta/K`, legible para el
-  server de prueba. Se carga únicamente la identidad indicada con `-i`; no se consulta
-  `SSH_AUTH_SOCK` ni se buscan claves por defecto. Sin `-i`, la autenticación falla
-  según FR-5, después de comprobar la clave del host.
-- La importación de `-i` usa una frase vacía explícita y un callback que rechaza
-  solicitudes de frase sin interacción; no se dejan los defaults de la biblioteca
-  que pueden pedirla por terminal. Una clave ilegible, inválida o que requiera frase
-  produce `ssh-pane: authentication failed` y estado 255, igual que FR-5.
+- Usar un contenedor o VM Linux desechable previamente preparado, sin nuevo job de CI.
+  La cuenta no privilegiada de pruebas existe realmente, tiene shell `/bin/sh` utilizable
+  y home propio en la base de cuentas. `TP2_USER` es su `id -un`; `probe` es solo un
+  ejemplo de nombre, no una cuenta que se presupone instalada. Tmux se ejecuta con
+  ese UID; sshd acepta esa misma cuenta. Cambiar solo `$HOME` **no** aísla libssh 0.9.0,
+  que consulta `getpwuid_r` antes de usar HOME como fallback.
+- `TP2_ROOT` es un directorio temporal privado (0700), propio de esa cuenta. Guardar allí
+  claves, configuración/logs del fixture y evidencias por corrida. La identidad `K`
+  es absoluta, sin frase, con permisos 0600; su pública es la única autorizada.
+  `/ruta/K` en los ejemplos representa ese archivo del fixture, no otra ruta.
+  Generar también otra clave no autorizada, otra clave de host y una identidad con
+  frase solo para pruebas negativas. Preparar `~/.ssh` 0700 y known_hosts 0600 dentro
+  del home desechable. No se usa una clave privada real.
+- `sshd` solo escucha en `127.0.0.1:2222`; el puerto debe estar libre y se registra
+  configuración efectiva con `sshd -T` y validación con `sshd -t`, ambos exit 0.
+  Configuración propia con `ListenAddress 127.0.0.1`, `Port 2222`, HostKey/PidFile/
+  AuthorizedKeysFile absolutos del fixture, `AllowUsers` igual a TP2_USER,
+  `PubkeyAuthentication yes`, `PasswordAuthentication no`,
+  `KbdInteractiveAuthentication no`, `UsePAM no`, `UseDNS no`, `PermitTTY yes`,
+  `PermitUserRC no` y `LogLevel DEBUG3`. Se ejecuta en primer plano con `-D -e -f`,
+  **sin `-d`**, que solo atiende una conexión. Preparación de cuenta/directorios de
+  privsep y privilegios de sshd, si la distribución los requiere, ocurre dentro del
+  entorno desechable; no se presupone que un sshd sin root pueda autenticar cualquier
+  UID. Registrar versión y prerrequisitos. Un servicio que no arranca no es un PASS.
+  En versiones con `PerSourcePenalties`, desactivar esas penalizaciones **solo en
+  este sshd aislado** (`PerSourcePenalties no`) y confirmarlo en -T, para que los
+  rechazos consecutivos no bloqueen los casos siguientes; si la opción no existe,
+  registrar esa versión y omitirla. Autenticación efectiva solo publickey; no hay
+  métodos/commands adicionales heredados de la configuración del sistema.
+- known_hosts se construye desde la **pública de host generada localmente**, no confiando
+  en una clave descubierta en la red: `[127.0.0.1]:2222 <tipo> <base64>`. FR-6a usa
+  archivo existente vacío; FR-6b otra pública del **mismo tipo**, para obtener CHANGED
+  en lugar de OTHER. FR-18 trata archivo ausente/ilegible. La API no crea ese archivo.
+- Tmux usa el binario absoluto del checkout (`TP2_TMUX`), un socket absoluto exclusivo
+  (`-S <TP2_ROOT/socket>`) y `-f /dev/null` en **todas** las invocaciones, incluyendo
+  consultas/capture/kill; `tmux` en los ejemplos significa esa invocación. Crear sesión
+  desconectada de 160×48 con `/bin/sh`, fijar `history-limit` a 5000 antes de crear panes
+  y conservar un pane local `<local>` cuyo ID `%...` se registra antes del split.
+  La shell remota no tiene rc que genere ruido; TERM proviene de `default-terminal`.
+- Abrir con `-P -t <local>` y resolver su línea de resultado con `display -p -t <resultado>
+  '#{pane_id}'`. Así `<pane>` es el ID nuevo también con `-d`, sin depender del pane activo.
+  Guardar código/stdout/stderr **de esa invocación**, antes de otra orden. Cuando se
+  prueba sin `-P`, obtener el nuevo ID por diferencia de `list-panes` en ese server sin
+  aperturas concurrentes. Para fallos asíncronos, fijar antes `remain-on-exit on`;
+  con off el pane se destruye y no se consulta su status después.
+- El prompt/eco no prueban auth ni salida. El fixture requiere una línea exacta que
+  el comando tecleado no contenga literalmente; por ejemplo, enviar
+  `printf '\nTP2-REMOTO-%s:%s\n' OK "$SSH_CONNECTION"`. Validar la línea producida
+  con prefijo `TP2-REMOTO-OK:` y los cuatro campos IP/puerto de SSH_CONNECTION, y
+  registrar `Accepted publickey` de esa conexión en sshd. El primer campo es
+  127.0.0.1, el tercero 127.0.0.1 y el cuarto 2222.
+- Guardar logs por conexión/PID y tiempos con reloj monotónico; polling ≤ 100 ms salvo
+  VC con umbral menor. Un listener sin banner de FR-11b/FR-13b registra aceptación y
+  retiene el socket sin enviar bytes ni cerrarlo por al menos 12 s; informa EOF tras
+  kill. No se usa una IP arbitraria como sinónimo de timeout. El socket agent señuelo, cuando un caso lo exige, se configura en el entorno del
+  **server al arrancarlo**, no solo en el cliente del comando; el fixture registra
+  su ruta y conexiones, acepta sin responder si se lo consulta. Para puerto rechazado
+  usar 127.0.0.1:2223 comprobando que no hay listener en el entorno exclusivo.
+- Registrar PID del server tmux y su conjunto estable de `/proc/<pid>/fd` antes del
+  escenario; excluir fds de herramientas externas y no contar cabeceras de `ss`.
+  Filtrar conexiones por PID/tupla de este fixture, no por un puerto global. Trazas
+  se adjuntan al **server existente antes** de abrir SSH, con herramientas fuera del
+  server. Tras cada caso destruir el pane nuevo y restaurar el pane local/layout.
+- Cleanup con trap de salida interrumpe y espera solo PIDs propios del fixture,
+  mata solo el server del socket exclusivo y elimina sus archivos temporales.
+  No usar `killall sshd`, ni reemplazar archivos de cuentas/SSH del host. Si faltan
+  sshd, claves/algoritmos compatibles, strace, /proc, ASan o recursos necesarios,
+  registrar el caso no verificado y la causa; un skip no satisface su VC.
+  Los scripts futuros deben inicializar su entorno porque el runner lo limpia
+  (`regress/Makefile:35-36`); no depender de variables heredadas invisibles.
 
 ### FR-1 · El comando existe y se lista
 
@@ -479,19 +595,21 @@ Los VCs de invariantes usan la matriz y el protocolo definidos arriba:
 **entonces** una línea empieza con `ssh-pane (sshp)` y muestra el uso
 `[-bdhPv] [-i identity] [-l size] [-p port] [-t target-pane] [-u user] host`.
 
-**VC-1:** `tmux list-commands | grep -c '^ssh-pane (sshp)'` da `1`.
+**VC-1:** guardar `tmux list-commands` con exit 0; hay exactamente una fila
+`ssh-pane (sshp)` cuyo uso es el literal anterior, y ninguna opción adicional.
+Comparar también la invocación por alias en VC-2.
 
 ### FR-2 · Abre un pane con una sesión remota
 
-**Dado** el entorno de prueba común, con la clave sin frase del usuario `probe` en `/ruta/K`,
-**cuando** se ejecuta `tmux ssh-pane -i /ruta/K -p 2222 -u probe 127.0.0.1`,
+**Dado** el entorno de prueba común, con la clave sin frase de la cuenta `TP2_USER` en `/ruta/K`,
+**cuando** se ejecuta `tmux ssh-pane -i /ruta/K -p 2222 -u "$TP2_USER" 127.0.0.1`,
 **entonces** el comando sale con código `0`, el pane activo se divide, el pane nuevo muestra
 el prompt de la shell remota y `#{pane_dead}` vale `0`.
 
-**VC-2:** `echo $?` tras el comando da `0`. Después de
-`tmux send-keys -t <pane> 'echo $SSH_CONNECTION' Enter`, `tmux capture-pane -p -t <pane>`
-contiene `127.0.0.1` en la línea de salida en ≤ 5 s, y `display -p -t <pane> '#{pane_dead}'`
-da `0`.
+**VC-2:** guardar exit 0 de la apertura y un ID nuevo; dentro de 5 s obtener la
+marca remota del entorno común, `Accepted publickey` para esa conexión y
+`display -p -t <pane> '#{pane_dead}'` igual a 0. Repetir por `sshp` con el mismo
+resultado. Un prompt o el eco de `$SSH_CONNECTION` no satisfacen la prueba.
 
 ### FR-3 · No se ejecuta el binario `ssh`
 
@@ -499,14 +617,18 @@ da `0`.
 **cuando** el pane está abierto,
 **entonces** ningún proceso descendiente del server `tmux` tiene `comm` igual a `ssh`.
 
-**VC-3:** `pgrep -P $(tmux display -p '#{pid}') -x ssh | wc -l` da `0`; además `strace -f -e
-trace=execve -p <pid del server>` no registra ningún `execve` durante la apertura.
+**VC-3:** adjuntar `strace -f -e trace=process -p <pid del server>` **antes** de
+abrir y registrar hasta obtener la marca de VC-2. No hay `execve`/`execveat` en el
+server ni sus descendientes durante esa apertura; listar además todos los
+descendientes (no solo hijos directos): 0 con comm `ssh`. Una traza ausente, empezada
+tarde o denegada por ptrace no pasa. El sshd remoto del fixture no es descendiente
+del server tmux y sus procesos no se mezclan con ese resultado.
 
 ### FR-4b · Autenticación con clave en archivo
 
 **Dado** el entorno de prueba común, con un `sshd` que acepta solo la clave `K`,
-`K` sin frase en `/ruta/K` y un `SSH_AUTH_SOCK` que apunta a un agent que no responde,
-**cuando** se ejecuta `tmux ssh-pane -i /ruta/K -p 2222 -u probe 127.0.0.1`,
+`K` sin frase en `/ruta/K` y un `SSH_AUTH_SOCK` que apunta al socket señuelo del entorno común,
+**cuando** se ejecuta `tmux ssh-pane -i /ruta/K -p 2222 -u "$TP2_USER" 127.0.0.1`,
 **entonces** la autenticación tiene éxito y el pane muestra la shell remota sin consultar
 el agent.
 
@@ -516,65 +638,76 @@ del comando, no registra una conexión al socket de ese agent.
 ### FR-5 · Sin credenciales válidas, falla dentro del pane
 
 **Dado** el entorno de prueba común con `remain-on-exit on`,
-**cuando** se ejecuta `tmux ssh-pane -p 2222 -u probe 127.0.0.1` sin `-i`,
+**cuando** se ejecuta `tmux ssh-pane -p 2222 -u "$TP2_USER" 127.0.0.1` sin `-i`,
 **entonces** el comando sale con `0`, el pane muestra la línea literal
 `ssh-pane: authentication failed` y queda muerto con estado de salida `255`.
 
-**VC-5:** `echo $?` da `0`. En ≤ 5 s, `capture-pane -p -t <pane>` contiene
+**VC-5:** guardar exit 0 de la apertura. En ≤ 5 s, `capture-pane -p -t <pane>` incluye una línea exacta
 `ssh-pane: authentication failed`, `#{pane_dead}` da `1` y `#{pane_dead_status}` da `255`.
 
 ### FR-6a · Clave de host desconocida: se rechaza
 
 **Dado** el entorno de prueba común con `remain-on-exit on`, y **sin** la línea
 `[127.0.0.1]:2222` en `~/.ssh/known_hosts`,
-**cuando** se ejecuta `tmux ssh-pane -p 2222 -u probe 127.0.0.1`,
+**cuando** se ejecuta `tmux ssh-pane -p 2222 -u "$TP2_USER" 127.0.0.1`,
 **entonces** la conexión se corta antes de autenticar, el pane muestra
 `ssh-pane: host key verification failed`, queda muerto con estado `255` y `known_hosts`
 **no se modifica**.
 
-**VC-6a:** `sha256sum ~/.ssh/known_hosts` da lo mismo antes y después. `capture-pane -p`
-contiene el texto literal y `#{pane_dead_status}` da `255`. En el log del `sshd` no aparece
-ningún intento de autenticación (`grep -c 'Accepted\|Failed publickey'` da `0`).
+**VC-6a:** guardar exit 0; dentro de 5 s hay una línea exacta
+`ssh-pane: host key verification failed` y `pane_dead=1`, `pane_dead_status=255`.
+SHA-256 y metadatos de known_hosts no cambian desde el inicio de la prueba.
+En el log DEBUG3 de **esa conexión** no hay mensajes de solicitud
+`userauth-request` ni aceptación/rechazo publickey; la ausencia de `Accepted` sola
+no demuestra que no se haya intentado autenticar. Conservar traza y log completos.
 
 ### FR-6b · Clave de host cambiada: se rechaza
 
 **Dado** el entorno de prueba común con `remain-on-exit on`, y la línea `[127.0.0.1]:2222` de
-`~/.ssh/known_hosts` reemplazada por la clave pública de **otro** par generado con
-`ssh-keygen -t ed25519`,
-**cuando** se ejecuta `tmux ssh-pane -p 2222 -u probe 127.0.0.1`,
+`~/.ssh/known_hosts` reemplazada por la clave pública de **otro** par del mismo tipo que el host del fixture,
+**cuando** se ejecuta `tmux ssh-pane -p 2222 -u "$TP2_USER" 127.0.0.1`,
 **entonces** pasa lo mismo que en FR-6a: el pane muestra
 `ssh-pane: host key verification failed`, queda muerto con estado `255` y `known_hosts` no se
 modifica.
 
-**VC-6b:** las mismas tres comprobaciones de VC-6a.
+**VC-6b:** todas las comprobaciones de VC-6a, con la variante de clave cambiada.
 
 ### FR-7a · Lo tecleado llega al remoto
 
-**Dado** un pane SSH abierto según FR-2,
-**cuando** se ejecuta `tmux send-keys -t <pane> 'touch /tmp/ssh-pane-fr7a' Enter`,
-**entonces** la shell remota ejecuta el comando. En loopback, el remoto es la misma máquina.
+**Dado** un pane SSH abierto según FR-2 y una ruta nueva `<TP2_ROOT>/fr7a-<corrida>`
+inexistente y accesible en la máquina loopback,
+**cuando** se envía `touch <ruta>` con `send-keys -t <pane> ... Enter`,
+**entonces** la shell remota crea ese archivo.
 
-**VC-7a:** en ≤ 2 s, `test -f /tmp/ssh-pane-fr7a` sale con `0`.
+**VC-7a:** comprobar ausencia antes; dentro de 2 s `test -f <ruta>` sale 0.
+El fixture elimina ese archivo después; no se reutiliza `/tmp/ssh-pane-fr7a`, que
+podría existir por una corrida anterior y producir un falso positivo.
 
 ### FR-7b · La salida remota se dibuja en el pane
 
-**Dado** un pane SSH abierto según FR-2,
-**cuando** la shell remota escribe 1000 líneas (`seq 1 1000`),
-**entonces** se dibujan en el pane con el mismo parser que un pane local
-(`input_parse_pane`).
+**Dado** un pane SSH abierto según FR-2 con el history-limit del entorno común,
+**cuando** la shell remota escribe las líneas numeradas de 1 a 1000,
+**entonces** aparecen completas y en orden con el parser común `input_parse_pane`.
 
-**VC-7b:** tras `tmux send-keys -t <pane> 'seq 1 1000' Enter`, `capture-pane -p -S -1000`
-contiene la línea `1000` y su `wc -l` es ≥ 1000.
+**VC-7b:** enviar
+`printf '\nTP2-INICIO-%s\n' LINEAS; n=1; while [ "$n" -le 1000 ]; do printf 'TP2-LINEA-%s\n' "$n"; n=$((n+1)); done; printf 'TP2-FIN-%s\n' LINEAS`.
+Dentro de 5 s, `capture-pane -p -S - -t <pane>` incluye líneas exactas
+`TP2-INICIO-LINEAS` y `TP2-FIN-LINEAS`; extraer solo el segmento entre ellas y
+compararlo byte a byte con las 1000 líneas esperadas. Las marcas no coinciden con
+el eco. Un conteo total de pantalla o hallar solo `1000` no basta.
 
 ### FR-8 · El tamaño del pane llega al remoto
 
 **Dado** un pane SSH abierto,
-**cuando** el pane cambia de tamaño (`resize-pane -x 100 -y 30`),
-**entonces** `stty size` en la shell remota imprime `30 100` en ≤ 2 s.
+**cuando** cambia su tamaño real con `resize-pane`,
+**entonces** `stty size` remoto informa las filas y columnas actuales del pane.
 
-**VC-8:** `send-keys 'stty size' Enter` tras el `resize-pane`, y `capture-pane -p` contiene
-`30 100`. (La función de `window.c:597` llama `fatal` en `window.c:622` si falla el ioctl;
-la rama SSH debe evitar pasar un socket por ese camino de PTY.)
+**VC-8:** guardar dimensiones previas, cambiar altura con `resize-pane -y 8` y exigir
+que la altura real cambie. Consultar `#{pane_height} #{pane_width}` y enviar
+`printf '\nTP2-TAM-%s\n' "$(stty size)"`; en ≤ 2 s la línea producida coincide con
+`TP2-TAM-<altura real> <ancho real>`. Repetir cambiando ancho en un split horizontal,
+con nuevo fixture. No exigir `30 100` si el layout no lo permite. Server vivo y sin
+`TIOCSWINSZ` sobre el socket SSH en la traza (`window.c:597`, `window.c:612-622`).
 
 ### FR-9 · Sin la función compilada, el comando no existe
 
@@ -616,9 +749,10 @@ bridge fija `status`/`PANE_STATUSREADY` antes del EOF local (`server-fn.c:382`).
 **cuando** se ejecuta `kill-pane`,
 **entonces** la conexión TCP se cierra y no quedan fds abiertos del bridge.
 
-**VC-11:** el conteo de `ls /proc/<pid del server>/fd \| wc -l` es el mismo antes de
-`ssh-pane` y después de `kill-pane` (±0); `ss -tn state established '( dport = :2222 )' \|
-wc -l` da `0`.
+**VC-11:** dentro de 2 s del kill, ID ausente, conteo/conjunto de fds del server
+restaurado al estable previo a abrir y ninguna conexión de esa tupla/PID en estado
+ESTABLISHED. Usar `ss -Htnp` (sin cabecera) y evidencias del listener/sshd del fixture;
+no contar todas las conexiones del puerto ni exigir que no exista TIME_WAIT.
 
 ### FR-11b · Cancelar una apertura pendiente libera sus recursos
 
@@ -641,29 +775,36 @@ server, con ASan, sin errores de memoria ni aumento acumulado de fds.
 **cuando** se ejecuta `respawn-pane -k -t <pane>`,
 **entonces** falla con `respawn pane failed: cannot respawn an ssh pane` y el pane no cambia.
 
-**VC-12:** el código de salida es `1`, el mensaje es literal, y `#{pane_dead}` sigue en `0`.
+**VC-12:** repetir sobre un pane abriendo (listener sin banner), uno Activo y uno
+muerto conservado con remain-on-exit. Código 1, texto literal; IDs, layout, estado y
+fds del pane no cambian por respawn. En Activo, una nueva marca remota prueba que
+sigue funcionando; en el muerto se conserva el status anterior. Matar el pane al
+terminar cada caso. El rechazo sucede antes de `spawn.c:312-349`.
 
 ### FR-13a · Puerto cerrado: se reporta en el pane
 
 **Dado** el entorno de prueba común con `remain-on-exit on`, y nada escuchando en
-`127.0.0.1:1`,
-**cuando** se ejecuta `tmux ssh-pane -p 1 -u probe 127.0.0.1`,
-**entonces** el pane muestra una línea que empieza con `ssh-pane: connection failed: ` y queda
+`127.0.0.1:2223`,
+**cuando** se ejecuta `tmux ssh-pane -p 2223 -u "$TP2_USER" 127.0.0.1`,
+**entonces** el pane muestra `ssh-pane: connection failed: connect` y queda
 muerto con estado `255`.
 
-**VC-13a:** en ≤ 2 s, `capture-pane -p -t <pane>` contiene `ssh-pane: connection failed: ` y
-`#{pane_dead_status}` da `255`.
+**VC-13a:** en ≤ 2 s, `capture-pane -p -t <pane>` incluye una línea exacta `ssh-pane: connection failed: connect`,
+`#{pane_dead}` da `1` y `#{pane_dead_status}` da `255`.
 
-### FR-13b · Host que no responde: se reporta en el pane al vencer el timeout
+### FR-13b · Una apertura sin progreso termina por timeout
 
-**Dado** el entorno de prueba común con `remain-on-exit on`, y `10.255.255.1` como destino
-(IP literal que no responde),
-**cuando** se ejecuta `tmux ssh-pane -p 2222 -u probe 10.255.255.1`,
-**entonces**, al vencer el timeout de NFR-2, el pane muestra una línea que empieza con
-`ssh-pane: connection failed: ` y queda muerto con estado `255`.
+**Dado** el entorno común con `remain-on-exit on`, y el listener loopback sin banner
+(definido en el entorno común) en 127.0.0.1:2224,
+**cuando** se ejecuta `tmux ssh-pane -p 2224 -u "$TP2_USER" 127.0.0.1`,
+**entonces**, al vencer NFR-2, el pane muestra
+`ssh-pane: connection failed: opening timeout` y queda muerto con estado 255.
 
-**VC-13b:** el texto y el estado son los de VC-13a. El tiempo lo mide VC-17 (NFR-2), así que
-este VC no fija otro umbral.
+**VC-13b:** guardar exit 0 y registro de aceptación del listener. Línea exacta y
+`pane_dead=1`, `pane_dead_status=255`; medir el plazo con VC-17. Esto verifica
+handshake estancado sin depender de rutas/firewall de 10.255.255.1. El deadline
+también rige otras etapas pendientes, como exige el contrato; no se afirma haber
+probado aquí todas las etapas con un servidor OpenSSH ordinario.
 
 ### FR-14 · Pérdida de una conexión activa
 
@@ -680,12 +821,134 @@ línea literal y `display -p -t <pane> '#{pane_dead} #{pane_dead_status}'` impri
 de transporte de ese pane. Una partición de red silenciosa que no genera EOF/error
 no tiene detección acotada en esta v1: no se agregan keepalives/reconexión.
 
+### FR-15 · Argumentos inválidos se rechazan antes de crear el pane
+
+**Dado** un server on con un target local válido,
+**cuando** el comando tiene aridad, flags o valores inválidos según el contrato,
+**entonces** sale 1, informa el error por stderr y no crea pane ni transporte.
+
+**VC-30:** ejecutar cada caso en el mismo estado inicial; guardar status/stdout/stderr,
+IDs y fds antes/después. Stdout vacío, exit 1 y 0 panes/fds nuevos en todos:
+
+| Invocación después de `tmux` | Stderr esperado |
+|---|---|
+| `ssh-pane` / `ssh-pane host extra` | `command ssh-pane: too few arguments (need at least 1)` / `command ssh-pane: too many arguments (need at most 1)` |
+| `ssh-pane -X host` / `ssh-pane -p` | `command ssh-pane: unknown flag -X` / `command ssh-pane: -p expects an argument` |
+| `ssh-pane ''`, `ssh-pane user@host`, `ssh-pane host:2222`, `ssh-pane ssh://host`, `ssh-pane '[::1]'` | `ssh-pane: invalid host` |
+| `ssh-pane -p <valor> host`, valores `0`, `65536`, `-1`, `abc`, vacío y ` 22` | `ssh-pane: invalid port` |
+| `ssh-pane -u '' host` / `ssh-pane -i '' host` | `ssh-pane: invalid user` / `ssh-pane: invalid identity path` |
+| `ssh-pane -h -v host` | `ssh-pane: -h and -v are mutually exclusive` |
+
+Con remain-on-exit on, casos válidos de parseo (sin prometer conexión): puertos
+1 y 65535, `-- ::1` y opciones con valor repetidas. En `-p 0 -p 2222` gana 2222 y VC-2 conecta; inverso rechaza 0.
+Exigir exit 0 y pane creado sin diagnóstico de validación para los casos válidos
+de parseo; no inferir autenticación de ello. Se cancelan al finalizar.
+Añadir host/usuario con espacios y un carácter de control: sus errores semánticos
+son los de la tabla. Para default de puerto, omitir `-p` en el entorno exclusivo
+sin servicio en 22; la traza de connect del server registra destino 127.0.0.1:22.
+No usar el puerto del sshd 2222 como supuesto default.
+
+### FR-16a · Dirección, posición y tamaño usan el layout común
+
+**Dado** un target local tiled con espacio para dividir,
+**cuando** `ssh-pane` usa dirección, `-b` o `-l` válidos,
+**entonces** la geometría es la de un split local equivalente, sin interpretar el
+puerto como porcentaje de tamaño.
+
+**VC-31a:** en sesiones separadas idénticas de 160×48, comparar dimensiones y posiciones
+`pane_left`, `pane_top`, `pane_width`, `pane_height` entre split local y SSH para:
+default, `-v`, `-h`, `-b -v`, `-b -h`, `-l 8`, `-l 25%`. Usar puerto 2222 **en todos**
+los SSH; retirar ese `-p` del equivalente local. Mismo resultado de layout y VC-2
+exitoso. Con `-l abc`, exit 1 y `invalid tiled geometry invalid`; con layout sin
+espacio, exit 1 y `no space for a new pane`; con target floating, exit 1 y
+`can't split a floating pane`. Esos rechazos no dejan pane/transporte nuevo.
+
+### FR-16b · Target identifica la ventana a dividir
+
+**Dado** dos ventanas y un target `<local>` explícito,
+**cuando** se crea un pane con `-t <local>`,
+**entonces** solo se divide la ventana de ese target.
+
+**VC-31b:** guardar IDs por ventana; la del target añade solo el nuevo pane y la otra
+conserva sus IDs. Exit 0 y VC-2 exitoso. Sin `-t`, comprobar el pane del contexto en
+una sesión única del fixture. Target ID inexistente: exit 1, error del resolver
+común `can't find pane: <id>` y 0 panes nuevos. No redefinir el resolver.
+
+### FR-16c · La selección obedece la opción detached
+
+**Dado** un target local y su pane activo registrado,
+**cuando** se abre un pane SSH con o sin `-d`,
+**entonces** con `-d` se conserva el activo anterior y sin `-d` se activa el nuevo.
+
+**VC-31c:** dos corridas desde el mismo estado inicial, una por variante; exit 0,
+selección esperada y VC-2 exitoso en el nuevo pane. Identificarlo por `-P` aunque no
+esté activo. Esta opción no se confunde con una sesión SSH sin PTY.
+
+### FR-16d · Print devuelve la ubicación del nuevo pane
+
+**Dado** un comando de apertura válido,
+**cuando** se ejecuta con o sin `-P`,
+**entonces** solo con `-P` imprime la ubicación según el template fijo del contrato.
+
+**VC-31d:** cuatro combinaciones de `-d` y `-P`: exit 0; con `-P`, una sola línea
+coincide con el template y resuelve al ID nuevo; sin `-P`, stdout vacío. Cada pane
+pasa VC-2. Repetir apertura exitosa omitiendo `-u`: log de sshd confirma TP2_USER,
+la cuenta del server, y se obtiene la marca remota. FR-15 cubre que un error de
+argumentos no imprime ubicación de éxito.
+
+### FR-17 · Una identidad inutilizable o rechazada no dispara fallback
+
+**Dado** host confiable y remain-on-exit on,
+**cuando** `-i` apunta a una ruta inexistente, archivo ilegible, contenido inválido,
+clave con frase o clave válida no autorizada,
+**entonces** el pane termina con `ssh-pane: authentication failed` y status 255,
+sin prompt ni intentos con otras identidades o agent.
+
+**VC-32:** corrida separada por cada variante, exit del comando 0, línea exacta y
+`pane_dead=1`, `pane_dead_status=255` dentro de 5 s. Tmux es no root para que 0000
+sea realmente ilegible. Además repetir sin `-i` (VC-5), con identidad default válida
+instalada en el home y un socket agent señuelo: sigue fallando, sin conexión al socket
+ni apertura de esa identidad default. Stdin del server no proporciona una frase;
+el otro pane sigue atendido. La clave con frase no produce espera ni prompts.
+Repetir caso exitoso con ruta relativa a cwd del cliente, incluso con un espacio
+en el nombre correctamente entrecomillado; obtiene el mismo resultado de VC-2.
+
+### FR-18 · Falta o error de confianza no autentica ni escribe
+
+**Dado** un host del fixture y remain-on-exit on,
+**cuando** known_hosts está ausente o no es legible por el UID del server,
+**entonces** falla antes de autenticar con el mismo diagnóstico/status de FR-6a;
+no crea, repara ni actualiza known_hosts.
+
+**VC-33:** una corrida por variante, exit 0 de apertura; dentro de 5 s línea exacta,
+`pane_dead=1`, status 255 y 0 solicitudes userauth de esa conexión. Ausente permanece
+ausente; ilegible conserva bytes/permisos. Repetir FR-6a/6b con una entrada correcta
+en `/etc/ssh/ssh_known_hosts` **solo dentro del entorno desechable**: sigue rechazando
+el host, porque la v1 no usa esa fuente. VC-14 confirma ausencia de escrituras.
+
+### FR-19 · Rechazar PTY termina la apertura
+
+**Dado** el fixture con clave/host válidos, remain-on-exit on y `PermitTTY no`,
+**cuando** se intenta abrir un pane SSH,
+**entonces** no se abre shell sin PTY como alternativa; el pane termina con
+`ssh-pane: connection failed: pty` y status 255.
+
+**VC-34:** sshd -T confirma PermitTTY no en una corrida separada; guardar exit 0,
+aceptación publickey y rechazo de PTY en el log. Dentro de 5 s hay línea exacta,
+`pane_dead=1`, status 255; el server sigue vivo y el transporte se libera. Restaurar
+PermitTTY yes al terminar. Errores de canal/shell conservan sus etapas de la tabla;
+no se presume que este fixture OpenSSH permita inducir todos sus rechazos.
+
 ### BR-1 · `known_hosts` es solo lectura
 
 `tmux` nunca escribe en `known_hosts` ni en ningún archivo bajo `~/.ssh`.
 
-**VC-14:** `strace -f -e trace=openat,open -o t.log tmux …` sobre FR-2, FR-6a y FR-6b: ninguna línea
-abre un archivo de `~/.ssh` con `O_WRONLY`, `O_RDWR` o `O_CREAT`.
+**VC-14:** adjuntar `strace -f -e trace=openat,open,creat,rename,renameat,unlink,unlinkat`
+al server existente **antes** del escenario y guardar la traza en TP2_ROOT. Ejecutar
+FR-2, FR-6a, FR-6b y FR-18, por separado: 0 aperturas en `~/.ssh` con O_WRONLY/O_RDWR/
+O_CREAT y 0 creaciones/renombrados/borrados allí. Registrar también inventario,
+SHA-256 y permisos antes/después (ausente sigue ausente). La preparación de claves
+ocurre antes de iniciar esta traza; trazar solo el cliente tmux no prueba el server.
 
 ### BR-2 · Sin secretos en logs ni en argumentos
 
@@ -697,8 +960,9 @@ La ruta de `-i` puede aparecer en logs; **el contenido de una clave y su frase, 
 
 Mientras una conexión SSH está en curso, los demás panes siguen atendidos.
 
-**VC-16:** con `ssh-pane -p 2222 10.255.255.1` en marcha (destino que no responde, IP literal
-para excluir DNS), un `send-keys` a otro pane se refleja en `capture-pane` en **≤ 100 ms**,
+**VC-16:** con `ssh-pane -p 2224 127.0.0.1` contra el listener sin banner del
+entorno común (aceptación registrada, IP literal para excluir DNS), un `send-keys`
+a otro pane se refleja en `capture-pane` en **≤ 100 ms**,
 medido 20 veces.
 
 ### NFR-2 · Timeout de apertura
@@ -707,7 +971,7 @@ La apertura se abandona a los **10 s** si no alcanzó el estado Activo (conexió
 handshake, auth, canal, PTY y shell). El deadline empieza al publicar el pane y no
 se reinicia por etapa. La condición medible usa IP literal y archivos locales
 accesibles; no garantiza el tiempo de DNS/filesystem síncronos. FR-13b referencia
-este mismo plazo para un host que no responde.
+este mismo plazo para una apertura que no progresa.
 
 **VC-17:** en el escenario de FR-13b, el tiempo entre la ejecución de `ssh-pane` y el momento
 en que `#{pane_dead}` pasa a `1` está entre **10 y 12 s** (se consulta cada 100 ms).

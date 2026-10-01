@@ -46,6 +46,12 @@ sin prometer esa cota para buffers internos de tmux/libssh. Resize conserva el �
 tamaño real. Drenar salida antes de estado de pane/EOF local; kill cancela sin esperar red.
 No liberar un canal después de `ssh_disconnect`, que invalida sus punteros.
 
+## Argumentos y fixture
+
+Filtrar `-p` antes de `layout_get_tiled_cell`: allí significa porcentaje, no puerto.
+Host key solo en known_hosts de la cuenta del server; archivo global desactivado.
+Pruebas SSH en Linux desechable con cuenta real, socket propio y listener sin banner.
+
 ## La guarda "solo Linux"
 
 Dos capas: `--enable-ssh` opt-in que aborta en no-Linux (patrón `--enable-systemd` /

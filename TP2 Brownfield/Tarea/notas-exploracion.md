@@ -446,3 +446,65 @@ documental. **Sin ejecutar** sesiones SSH, fixtures de red/contrapresión, ASan,
 medición de RSS ni tests de estados. Los máximos/deadlines son requisitos propuestos,
 no mediciones. El siguiente paso sigue siendo cerrar los FRs/argumentos y sus fixtures;
 la revisión completa de VCs de rendimiento y del plan de iteraciones se hace después.
+
+
+## Argumentos, errores y entorno del paso 5 — 2026-09-30
+
+Se concretan uso, defaults, valores inválidos, resultado `-P`, selección `-d`,
+identidad relativa y distinción entre rechazo síncrono del comando y error asíncrono
+con pane publicado. Son contratos propuestos del comando nuevo, no cambios a los
+comandos existentes. FR-15 a FR-19 y VC-30 a VC-34 (31a a 31d separados) completan los
+casos de argumentos, layout, identidad, confianza ausente/ilegible y rechazo de PTY.
+
+| Evidencia tmux leída en el commit base | Consecuencia |
+|---|---|
+| `arguments.c:208-282`, `cmd.c:527-537` | Se conserva parser común, `--`, mensajes de flags y aridad; no se inventa otra CLI |
+| `arguments.c:687-699` | Último valor gana en una opción repetida; el contrato lo explicita |
+| `layout.c:1640-1700` | **Conflicto real de nombres:** `-p` es porcentaje para el helper. El comando SSH filtra el objeto de geometría y no pasa su puerto al helper |
+| `arguments.c:998-1037`, `arguments.c:1067-1108` | Se conserva gramática/expansión de tamaño del layout, con rangos de la base; tamaño solicitado no promete tamaño realizable |
+| `spawn.c:292-306`, `server-client.c:2926-2941` | La identidad relativa se ancla al cwd efectivo del pane, copiado antes de la apertura asíncrona |
+| `cmd-split-window.c:33`, `cmd-split-window.c:69`, `cmd-split-window.c:285-310` | Target común, selección de pane y template fijo para `-P`; son precedentes, no una modificación de split-window |
+
+Evidencia externa de la misma copia libssh 0.9.0: `src/options.c` acepta `user@host`
+y enmascara PORT a 16 bits; el comando propuesto valida antes de pasar esos valores.
+`src/misc.c`, `ssh_get_user_home_dir`, consulta `getpwuid_r` antes de HOME; no basta
+cambiar una variable de entorno para aislar known_hosts. `src/knownhosts.c`,
+`ssh_session_get_known_hosts_entry`, puede aceptar una coincidencia en el archivo
+global. Para respetar la fuente de confianza de usuario elegida se desactiva ese
+archivo con `/dev/null`, se fija verificación estricta y solo se acepta
+`SSH_KNOWN_HOSTS_OK` de `ssh_session_is_known_server`. No se emplea una API que solo
+compruebe si hay entradas, ni una rutina de escritura/actualización de confianza.
+
+Fixture propuesto: Linux desechable con cuenta real y home de esa cuenta, claves
+locales del fixture, server tmux con socket absoluto exclusivo y sshd aislado. El
+[manual oficial de sshd](https://man.openbsd.org/sshd) documenta primer plano,
+configuración propia y validación; `-d` atiende una conexión y se excluye para corridas
+repetidas. Las opciones se contrastan con
+[sshd_config](https://man.openbsd.org/sshd_config); la versión Linux instalada debe
+validarlas con `-t`/`-T`, sin suponer que una variante cualquiera funcione. Los logs
+se correlacionan con la conexión y no con todos los servicios del host. Se sustituye
+10.255.255.1 por listener loopback sin banner para timeout: una IP arbitraria podría
+responder, ser inalcanzable o rechazarse inmediatamente. Se usan marcas calculadas,
+archivo nuevo por corrida, salida ordenada completa y dimensiones reales para evitar
+PASS por eco, restos de otra corrida, conteo de pantalla o limitaciones del layout.
+
+El archivo de criterios de ejemplo antes revisado ya no se encontró en la ruta
+Downloads indicada al continuar este paso. Se conserva la evaluación registrada en
+los pasos anteriores y se releen las correcciones TP1 adjuntas; se usan como criterios
+de claridad/observables, sin modificar TP1 ni tratar sus textos como instrucciones
+para ejecutar acciones externas. La consigna TP2 sigue exigiendo análisis y spec,
+solo Linux y ninguna implementación C.
+
+**Verificación de este paso:** lectura de código/headers y consistencia documental;
+no se arrancaron sshd/tmux, ni se generaron claves, ni se alteraron cuentas o archivos
+SSH. Los VCs definen pruebas futuras, no resultados medidos. Quedan la revisión
+integral de rendimiento/VCs del paso 6, el plan de iteraciones del paso 7 y la auditoría
+final del paso 8; no se declara cerrada la entrega completa.
+
+Comprobaciones documentales finales del paso 5: 33 FR/BR/NFR más 8 invariantes,
+con 41 VCs únicos y sin referencias VC sin definición. Cada FR conserva
+Dado/Cuando/Entonces y su VC. Enlaces relativos válidos; capsule de 98 líneas.
+Se comprobaron los límites de 245 citas de fuentes tmux y se leyeron los bloques
+nuevos; los conteos históricos del paso 1 no se presentan como conteos actuales.
+La copia de tmux sigue limpia en el hash base y `git diff --check` no informa errores.
+Solo se editaron los tres Markdown de TP2; TP1 y el PDF aportado siguen sin cambios.

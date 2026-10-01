@@ -577,6 +577,10 @@ No se prueba contra servicios ni archivos SSH personales.
   usar 127.0.0.1:2223 comprobando que no hay listener en el entorno exclusivo.
 - Registrar PID del server tmux y su conjunto estable de `/proc/<pid>/fd` antes del
   escenario; excluir fds de herramientas externas y no contar cabeceras de `ss`.
+  Para los ensayos de restauración de fds, calentar antes el mismo server con una
+  apertura/cierre SSH válido y retirar ese pane; guardar inventario estable con
+  consultas CLI terminadas, antes de empezar el escenario medido. No ignorar
+  arbitrariamente nuevos fds como cachés; correlacionar tipo/tupla/propietario.
   Filtrar conexiones por PID/tupla de este fixture, no por un puerto global. Trazas
   se adjuntan al **server existente antes** de abrir SSH, con herramientas fuera del
   server. Tras cada caso destruir el pane nuevo y restaurar el pane local/layout.
@@ -656,7 +660,8 @@ del comando, no registra una conexión al socket de ese agent.
 
 **VC-6a:** guardar exit 0; dentro de 5 s hay una línea exacta
 `ssh-pane: host key verification failed` y `pane_dead=1`, `pane_dead_status=255`.
-SHA-256 y metadatos de known_hosts no cambian desde el inicio de la prueba.
+SHA-256, tamaño, permisos, propietario y mtime de known_hosts no cambian.
+No exigir atime inalterado: la propia lectura puede actualizarlo.
 En el log DEBUG3 de **esa conexión** no hay mensajes de solicitud
 `userauth-request` ni aceptación/rechazo publickey; la ausencia de `Accepted` sola
 no demuestra que no se haya intentado autenticar. Conservar traza y log completos.
@@ -767,7 +772,14 @@ aparece en `list-panes`, no queda conexión establecida entre el server tmux y e
 listener y los fds vuelven al conteo estable anterior. Esperar hasta 12 s desde la
 apertura y emitir `display-message`/`send-keys` al otro pane: ambos comandos salen 0,
 el server sigue vivo y no aparece ningún pane nuevo. Repetir 20 veces en el mismo
-server, con ASan, sin errores de memoria ni aumento acumulado de fds.
+server, con ASan, sin errores de memoria ni aumento acumulado de fds. Guardar
+comandos de compilación/enlace con `-fsanitize=address -fno-omit-frame-pointer`,
+evidencia de runtime ASan y logs por proceso; arrancar el server desde el driver
+con `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` antes de las operaciones. Terminar
+el server normalmente al final para obtener el informe de leaks, conservar exit
+code y 0 informes ASan/LSan. Declarar cobertura de dependencias instrumentadas:
+una libssh sin instrumentar no prueba ausencia de todos sus errores internos.
+ASan no sustituye las comprobaciones de fds/TCP ni es el build de VC-18.
 
 ### FR-12 · `respawn-pane` sobre un pane SSH se rechaza
 
@@ -926,18 +938,58 @@ ausente; ilegible conserva bytes/permisos. Repetir FR-6a/6b con una entrada corr
 en `/etc/ssh/ssh_known_hosts` **solo dentro del entorno desechable**: sigue rechazando
 el host, porque la v1 no usa esa fuente. VC-14 confirma ausencia de escrituras.
 
-### FR-19 · Rechazar PTY termina la apertura
+### FR-19 · Solicitudes de apertura rechazadas terminan el pane
 
-**Dado** el fixture con clave/host válidos, remain-on-exit on y `PermitTTY no`,
-**cuando** se intenta abrir un pane SSH,
-**entonces** no se abre shell sin PTY como alternativa; el pane termina con
-`ssh-pane: connection failed: pty` y status 255.
+**Dado** host/clave válidos, remain-on-exit on y un servidor que rechaza una solicitud
+de canal, PTY o shell,
+**cuando** se intenta abrir el pane SSH,
+**entonces** termina con status 255 y el diagnóstico de la etapa; no se abre una shell
+sin PTY ni se cambia de solicitud como alternativa.
 
-**VC-34:** sshd -T confirma PermitTTY no en una corrida separada; guardar exit 0,
-aceptación publickey y rechazo de PTY en el log. Dentro de 5 s hay línea exacta,
-`pane_dead=1`, status 255; el server sigue vivo y el transporte se libera. Restaurar
-PermitTTY yes al terminar. Errores de canal/shell conservan sus etapas de la tabla;
-no se presume que este fixture OpenSSH permita inducir todos sus rechazos.
+**VC-34:** corrida por etapa: rechazo de canal → `ssh-pane: connection failed: channel`,
+PTY → `ssh-pane: connection failed: pty`, shell → `ssh-pane: connection failed: shell`.
+Cada comando sale 0; aceptación publickey y rechazo preciso están registrados en
+el servidor del fixture; en ≤ 5 s línea exacta, pane_dead=1, status 255, server vivo
+y transporte liberado. OpenSSH con PermitTTY no cubre PTY (-T lo confirma); para
+canal y shell usar el fixture controlable del protocolo de medidas. Solo se marca
+el grupo aprobado si se verificaron las tres etapas. No se atribuye al sshd ordinario
+una capacidad de gates/rechazos que no proporciona. Cleanup por corrida.
+
+### FR-20 · Cierre remoto incompleto no deja un pane colgado
+
+**Dado** un pane activo, remain-on-exit on y consumidor local activo,
+**cuando** llega EOF sin status/CLOSE, o status sin EOF/CLOSE, y no llegan los
+metadatos restantes,
+**entonces** tras drenar la salida recibida, el plazo de 2 s del contrato termina el
+pane con status 255 y `ssh-pane: connection failed: incomplete remote close`.
+
+**VC-35:** fixture SSH controlable, dos corridas independientes: `shutdown_write`
+solo, o `send_exit_status(7)` solo; no llamar close ni cerrar el Transport por al
+menos 4 s. Mantener referencias al canal para evitar cierre por garbage collection.
+Guardar envío remoto, recepción y `grace_start_ms`/deadline de cierre propuestos del
+bridge; sin salida pendiente, en polling ≤ 100 ms el pane queda muerto/status 255
+entre +2 y +3 s desde grace_start, con línea exacta y transporte liberado. No se
+vence antes de +2 s ni se reinicia por polls. Server vive y prueba local de VC-16
+sigue atendida. No atribuir una caída TCP del fixture a cierre incompleto.
+
+### FR-21 · Estado remoto normal se conserva como estado de pane
+
+**Dado** un fin remoto completo con salida drenada y remain-on-exit on,
+**cuando** se recibe exit status remoto,
+**entonces** el pane conserva los 8 bits bajos del primer status como salida normal;
+un CLOSE sin status usa 255, como exige el contrato.
+
+**VC-36:** fixture controlable, corridas con status **0**, **7**, **263** y dos statuses
+**7 seguido de 9** antes de CLOSE; se observan respectivamente `pane_dead_status`
+0, 7, 7 y 7, con pane_dead=1 dentro de 2 s del CLOSE. 263 & 255 = 7: no asignar ese
+entero directamente a la representación de waitpid. El fixture usa `send_exit_status`
+y después close, guardando la secuencia; la shell real de VC-10a sigue siendo el
+control end-to-end normal. En quinta corrida, CLOSE sin status produce 255, sin
+esperar a otro proceso hijo ni inventar un status 0. Antes de cada fin, enviar
+128 KiB de payload determinista y una marca calculada; pipe-pane conserva longitud/
+hash y marca completos en todas las variantes. Fds del bridge se liberan con el
+pane muerto aún presente. La [API de canal del fixture](https://docs.paramiko.org/en/stable/api/channel.html)
+permite enviar status y cerrar por separado; no es una API de tmux ni de libssh.
 
 ### BR-1 · `known_hosts` es solo lectura
 
@@ -950,69 +1002,240 @@ O_CREAT y 0 creaciones/renombrados/borrados allí. Registrar también inventario
 SHA-256 y permisos antes/después (ausente sigue ausente). La preparación de claves
 ocurre antes de iniciar esta traza; trazar solo el cliente tmux no prueba el server.
 
-### BR-2 · Sin secretos en logs ni en argumentos
+### BR-2 · La función no expone la identidad importada en logs ni argv
 
-La ruta de `-i` puede aparecer en logs; **el contenido de una clave y su frase, nunca**.
+El contenido de la clave local importada y cualquier frase de esa identidad nunca
+se incorporan a argumentos de procesos, diagnósticos ni logs **generados por la
+función SSH**. La ruta `-i` puede aparecer. No hay opción para ingresar una frase;
+una clave con frase falla sin interacción. Libssh se configura con
+`SSH_OPTIONS_LOG_VERBOSITY = SSH_LOG_NOLOG`: `-vv` habilita metadatos propios de tmux,
+no volcados de paquetes/estructuras privadas de libssh. Esas opciones existen en
+sus headers 0.9.0.
 
-**VC-15:** con `tmux -vv`, `grep -c 'BEGIN OPENSSH PRIVATE KEY' tmux-server-*.log` da `0`.
+Fundamento: fallas reproducibles y colas observables no requieren registrar secretos.
+Límite: el logging existente de tmux puede registrar comandos/salida del pane;
+esta regla no promete redactar cualquier secreto que el usuario teclee o que un
+remoto envíe como datos. No se modifica ese logging común ni se le atribuye al bridge
+una garantía sobre contenido arbitrario. Las claves del fixture no se teclean ni se
+imprimen desde la shell remota.
 
-### NFR-1 · El event loop no se bloquea por la red
+**VC-15:** arrancar un server nuevo con `-vv`, rutas/logs exclusivos, y ejecutar éxito
+FR-4b, ausencia FR-5 y todas las fallas de identidad FR-17. Una herramienta externa
+lee la clave de prueba y busca, sin imprimirla, cabeceras PEM/OpenSSH, cada línea
+no vacía del cuerpo base64, su representación hexadecimal y la frase canario única
+de la clave cifrada en todos los logs de server/cliente/salida, stdout/stderr de los
+comandos y argv de los procesos del fixture. Exigir **0 coincidencias**; archivo
+inexistente o error de lectura no se interpreta como 0. El informe guarda nombres
+recorridos y cantidad, nunca el patrón secreto; la herramienta lee los patrones
+desde archivos, no los pasa como argumentos a grep/subprocesos. Revisar además los call sites nuevos
+de logging: solo ID del pane, estados, códigos de motivo, tiempos y tamaños de colas;
+no pasan buffers de clave, payload, frase ni `ssh_get_error` sin filtrar. Confirmar
+configuración NOLOG antes de conectar. La búsqueda de una sola cabecera no demuestra
+que no se haya volcado el cuerpo de una clave.
 
-Mientras una conexión SSH está en curso, los demás panes siguen atendidos.
+### Protocolo común para medidas y escenarios especiales
 
-**VC-16:** con `ssh-pane -p 2224 127.0.0.1` contra el listener sin banner del
-entorno común (aceptación registrada, IP literal para excluir DNS), un `send-keys`
-a otro pane se refleja en `capture-pane` en **≤ 100 ms**,
-medido 20 veces.
+Las herramientas de prueba son **externas al producto**, en el Linux desechable del
+fixture. No se entrega aquí su implementación ni se modifica el runner/CI existente.
 
-### NFR-2 · Timeout de apertura
+- Driver Python 3 con `time.monotonic_ns()` para tiempos, subprocesses con argv separados
+  y un timeout propio por consulta. Registrar kernel, CPU/vCPU, límites CPU/memoria del
+  entorno, compilador/flags, versiones tmux/libssh/libevent/sshd y dimensiones reales.
+  Bytes se expresan en MiB = 2^20 bytes; milisegundos no se obtienen con `date +%s`.
+- VC-16/17/27 usan logs `-vv` propuestos del bridge: ID, estado, `created_ms`,
+  `deadline_ms`, `finished_ms`, `grace_start_ms`/deadline de cierre, máximos
+  `tx_bytes`/`rx_bytes` y transición pause/resume
+  con dirección/tamaño. Son nombres de campos **propuestos**, no logs de la base.
+  Tiempo del server con reloj monotónico (precedente `get_timer`, `tmux.c:331-342`)
+  y deadline único `created_ms + 10000`. El driver y el server se ejecutan en el mismo
+  dominio de reloj del fixture. Si falla ese reloj, la prueba de tiempos no pasa.
+- El presupuesto de VC-18 se mide en build normal optimizado, sin `-v`, ASan,
+  strace/gdb ni clientes control retrasados. El productor, colector/hash y monitor
+  no corren dentro del server tmux; su RSS no se suma a la del server. Los buffers
+  comunes/pipe del propio server **sí** forman parte de su RSS. Las pruebas de ASan,
+  trazas y logs son corridas funcionales distintas, no resultados de rendimiento.
+- Para respuestas tardías/rechazadas, usar un **servidor SSH de prueba controlable**
+  aparte del sshd común: Python 3 + Paramiko, solo dependencia del fixture, versión
+  y algoritmos registrados. `ServerInterface` permite decidir auth publickey,
+  canal session, PTY y shell. Solo acepta usuario/clave del fixture, usa host key
+  conocido generado localmente y puerto loopback exclusivo 2225. No es un cliente
+  alternativo ni una dependencia de build de tmux; no provee forwarding ni otras
+  capacidades. Sus callbacks normales no hacen sleeps; para provocar estancamiento,
+  el proceso de prueba se detiene en puntos de gate y el driver lo reanuda por señal.
+  Las pausas deliberadas son del proceso remoto de prueba, nunca del loop de tmux.
+  Gate notifica etapa y el driver confirma estado detenido antes de liberar/medir.
+  El diseño se apoya en la [API oficial de servidor](https://docs.paramiko.org/en/stable/api/server.html);
+  el helper está **por construir/verificar**, no se afirma que ya exista.
+- Scripts que solo requieren OpenSSH no dependen de ese fixture controlable.
+  Si falta Python, Paramiko/gates, /proc o permisos de medición, registrar qué VC
+  queda no verificado; no reemplazar su resultado por PASS ni hacer instalaciones
+  implícitas. No se añaden flags de prueba a `ssh-pane`, hooks de pausa al parser,
+  hilos en el cliente ni nuevos jobs de CI.
 
-La apertura se abandona a los **10 s** si no alcanzó el estado Activo (conexión,
-handshake, auth, canal, PTY y shell). El deadline empieza al publicar el pane y no
-se reinicia por etapa. La condición medible usa IP literal y archivos locales
-accesibles; no garantiza el tiempo de DNS/filesystem síncronos. FR-13b referencia
-este mismo plazo para una apertura que no progresa.
+### NFR-1 · Respuesta del loop con red pendiente
 
-**VC-17:** en el escenario de FR-13b, el tiempo entre la ejecución de `ssh-pane` y el momento
-en que `#{pane_dead}` pasa a `1` está entre **10 y 12 s** (se consulta cada 100 ms).
+Con apertura estancada en loopback/IP literal y archivos locales accesibles, cada
+uno de **20 ensayos** de `send-keys` al otro pane local debe producir su marca
+visible en **≤ 100 ms**, incluyendo envío y consulta. Con contrapresión provocada
+por el fixture de NFR-4, cada uno de 20 comandos independientes `display-message -p`
+debe responder en ≤ 100 ms. No se promete que un cliente control que no lee vea
+nueva salida mientras la lectura común de panes está pausada; se conserva ese
+comportamiento de tmux. DNS/filesystem síncronos quedan fuera de esta cota.
 
-### NFR-3 · Rendimiento y memoria
+**VC-16:** listener sin banner en 127.0.0.1:2224; aceptación registrada y apertura aún
+pendiente durante todas las muestras. En `<local>` enviar, por muestra,
+`printf '\nTP2-LAT-%s\n' <nonce-contador>` con Enter; la línea producida no está
+literalmente en el eco. Driver guarda t0 **antes** de lanzar send-keys y t1 cuando
+capture-pane encuentra esa línea exacta; polling con intervalo objetivo ≤ 5 ms,
+registrando intervalos reales. Las 20 diferencias t1−t0 son ≤ 100 ms, sin promediar
+ni borrar outliers. Consultas/comandos salen 0, server vive; timeout individual a
+100 ms es fallo. Ejecutar control idéntico sin apertura SSH para registrar cuánto
+cuesta el propio fixture: una baseline lenta se informa, no autoriza subir el umbral.
+Completar las muestras antes del deadline; si se venció, repetir con una apertura
+nueva en vez de medir panes sin conexión pendiente. VC-27 cubre contrapresión.
 
-Un pane SSH sostiene **≥ 20 MiB/s** de salida remota en loopback, y el pico de memoria
-residente del server `tmux` crece **≤ 32 MiB** mientras dura esa transferencia.
+### NFR-2 · Un único timeout de apertura
 
-**VC-18:** en un pane SSH abierto según FR-2, se lee `VmRSS` de `/proc/<pid del server>/status`
-como base. Después se ejecuta `send-keys -t <pane> 'yes | head -c 200M; echo FIN-$((9+9))' Enter`
-(exactamente 200 MiB de salida; la marca se calcula para que no coincida con el eco del
-comando tecleado). Se cumple si:
-(a) una línea igual a `FIN-18` aparece en `capture-pane -p` en **≤ 10 s**, es decir, 200 MiB / 10 s = 20 MiB/s;
-y (b) `VmHWM` de `/proc/<pid del server>/status` menos la `VmRSS` base es **≤ 32 MiB**.
+La apertura se abandona a los **10 s** si no llegó a Activo, cubriendo conexión,
+handshake, auth, canal, PTY y shell. El deadline empieza al publicar el pane y no se
+reinicia por etapa, callback ni AGAIN. En el fixture con consumidor activo, IP
+literal y archivos locales accesibles, pane muerto/status 255 y transporte liberado
+son observables dentro de **12 s** desde esa publicación. No garantiza tiempos de
+DNS/filesystem síncronos. FR-13b usa este mismo plazo.
 
-### NFR-4 · Colas propias del bridge acotadas
+**VC-17:** dos grupos, en corridas separadas con remain-on-exit on:
 
-La cola local → remoto y la cola remoto → local del bridge contienen **≤ 1 MiB cada
-una**, también con contrapresión; reanudan recepción al bajar a **≤ 512 KiB**.
-Son colas propias, no una cota sobre buffers internos de tmux/libssh ni sobre todo
-el RSS del server. La pausa conserva el contenido y las escrituras parciales no
-lo duplican; `kill-pane` cancela sin esperar al consumidor.
+1. Listener sin banner de FR-13b. Guardar t0 externo antes de la invocación y sus
+   stdout/status; logs del pane registran created/deadline. Timeout interno no se
+   dispara antes de `created_ms + 10000`; en polling ≤ 100 ms, el ID informa
+   `pane_dead=1`, status 255 y literal `ssh-pane: connection failed: opening timeout`
+   entre 10 y 12 s desde created. Comparar también el tiempo externo para identificar
+   demora de la invocación; no confundir su inicio con publicación. Fds/conexión se
+   liberan, sin esperar a que el listener termine su retención de 12 s.
+2. Fixture SSH controlable: tres pares de gates **auth → canal**, **canal → PTY**,
+   **PTY → shell**. La primera etapa se retiene hasta t_created + 8 s y luego se
+   acepta; la siguiente permanece retenida hasta al menos +12 s. Registrar la primera
+   aceptación y llegada a la etapa siguiente **antes** del deadline. Si no se alcanzó,
+   ese ensayo no verifica el reinicio de plazo. En los tres, el mismo deadline vence
+   a +10 s y el pane está muerto/status 255 a más tardar +12 s, aunque la etapa haya
+   cambiado a +8 s. `deadline_ms` nunca cambia. Liberar/terminar los gates y verificar
+   que no hay callbacks sobre un contexto muerto. El fixture solo acepta/rechaza
+   solicitudes para probar apertura; no requiere shell real para estos ensayos.
 
-**VC-27:** en el fixture de FR-2, ejecutar dos corridas separadas: bloquear durante
-1 s al consumidor de salida con un cliente control que no lee (patrón de
-`regress/respawn-pane-control-lag.sh`), con 8 MiB de salida remota; y detener durante
-1 s el consumo de entrada del PTY remoto, con 8 MiB de entrada al pane. Los logs de
-prueba `-vv` registran máximos `tx_bytes`/`rx_bytes` y transiciones `pause`/`resume`
-con dirección y bytes, calculados sobre las **longitudes reales** de ambas colas,
-sin contenido de datos/claves. Se exige máximo ≤ 1 MiB, pausa al llenar
-y reanudación solo a ≤ 512 KiB, en ambas direcciones. Después de reanudar, la salida
-incluye una marca final calculada que no coincide con el eco; el server sigue vivo.
-La entrada se verifica en un PTY remoto en modo no canónico y sin eco, con longitud
-y hash de los bytes recibidos iguales al payload enviado; no se confunde el límite
-de una línea del terminal con una pérdida del bridge. La prueba de RSS sigue siendo
-VC-18. Registrar la salida completa mediante `pipe-pane` hacia un archivo temporal
-del fixture y comparar longitud/hash del segmento de payload entre marcas, con
-postprocesamiento de salida del PTY desactivado para ese segmento. Una marca final
-sola no prueba ausencia de pérdidas o duplicados. Durante pausa/reanudación, repetir
-en el otro pane local el chequeo de latencia de NFR-1: ≤ 100 ms, 20 veces.
+Esto comprueba el plazo acumulado; medir solo un TCP/handshake estancado no prueba
+que auth/PTY/shell no armen timers nuevos. Que la biblioteca devuelva AGAIN tampoco
+prueba que el timer se atienda: se comprueban los observables del pane y del server.
+
+### NFR-3 · Rendimiento y crecimiento de RSS en carga definida
+
+En Linux on, build normal, loopback con compresión SSH desactivada en el fixture,
+una sesión desconectada de 160×48 y history-limit **2000**, un pane SSH debe entregar
+**200 MiB = 209715200 bytes** íntegros a través del transporte/parser común en
+**≤ 10 s** (≥ 20 MiB/s). La memoria del **server** crece **≤ 32 MiB** sobre su
+baseline activa para ese ensayo, medida por VmHWM reiniciado/VmRSS en /proc. No es
+una cota de colas, memoria del sshd/colector ni de configuraciones arbitrarias de
+history-limit; NFR-4 limita colas propias. Se requiere fixture con productor/colector
+capaces de sostener la carga, y se registra su hardware/límites.
+
+**VC-18:** tres corridas con server/pane nuevos por corrida; todas deben cumplir:
+
+1. Antes del pane, fijar history-limit 2000 (default de `options-table.c:845-851`),
+   en lugar de los 5000 del fixture funcional. Abrir/autenticar y validar VC-2;
+   disponer de archivos de payload ya generados en el entorno loopback. Payload
+   determinista: bloque de 1024 bytes formado por 16 líneas de **62 caracteres ASCII
+   `A` + CRLF**, repetido 204800 veces. Longitud 209715200 y SHA-256 de referencia
+   calculados fuera de tmux; sin secuencias de control salvo CRLF. No usar `yes | head`
+   como sustituto de verificación de longitud/integridad.
+2. Preparar PTY remoto sin eco y con OPOST desactivado, conservando stdin de shell
+   utilizable; productor del fixture emite CRLF explícito. Instalar un colector externo
+   con `pipe-pane -O` antes de la carga; consume continuamente, identifica marcas
+   calculadas `TP2-INICIO-<nonce>`/`TP2-FIN-<nonce>` y guarda longitud/hash del segmento
+   **entre** las marcas. `window.c:1640-1647` reenvía salida al pipe antes del parser;
+   no se cambia ese código. El pipe sí crea un hijo de instrumentación
+   (`cmd-pipe-pane.c:128-167`): no se confunde esta corrida con la traza sin exec de VC-3.
+3. Con pane activo/pipe instalados y buffers sin carga, registrar PID **y starttime**
+   del server. Solo en ese PID de prueba, escribir `5` en `/proc/<pid>/clear_refs`;
+   exigir éxito y leer enseguida `VmRSS` y `VmHWM` de status, guardando ambos.
+   Así se reinicia el pico anterior; baseline B = VmRSS. Si no puede reiniciarse o
+   leerse, no sustituir por un pico histórico ni marcar memoria aprobada. Un monitor
+   externo muestrea VmRSS cada 10 ms y guarda tiempos reales y VmHWM final con el
+   server aún vivo. PID/starttime deben seguir siendo los mismos. Valores kB de
+   /proc se convierten como KiB: límite = **32768 KiB**.
+4. Driver guarda t0 antes de enviar la orden de emisión. Productor escribe marca
+   inicial, payload exacto y marca final; no hay sleeps dentro del tramo de datos.
+   Colector reconoce fin y capture-pane confirma línea final renderizada; t1 es el
+   momento en que **ambas** condiciones están observadas. Exigir segmento de
+   209715200 bytes y mismo SHA-256, t1−t0 ≤ 10 s. La tasa es `200 / (t1−t0 en segundos)`
+   MiB/s; cifrado/PTY/entrega al parser y colección están dentro de ese tiempo.
+5. Exigir `max(VmHWM final, máximo VmRSS muestreado) − B ≤ 32768 KiB`; conservar series
+   y valores iniciales/finales. La documentación [oficial de /proc](https://docs.kernel.org/filesystems/proc.html)
+   explica HWM/reset y advierte de precisión del accounting RSS; esta es la métrica
+   operacional elegida, no una prueba byte a byte de cada allocation. No mezclar
+   muestras smaps, memoria virtual, PSS o RSS de todo un árbol como si fueran VmRSS.
+
+El colector de longitud/hash procesa bloques, no retiene 200 MiB en el server ni
+se basa solo en la última marca visible. Archivo temporal/grabación fuera del server
+son evidencia, no un límite a su RSS. Separar costo del harness con una corrida
+local equivalente en la base y candidato-on, mismo PTY/parser/pipe/payload: informar
+si ya incumple el presupuesto. No convertir un resultado lento del candidato en
+PASS por atribuirlo al hardware; un prerrequisito medible que falta queda no verificado.
+Se informa cada corrida, no solo la mejor. 20 MiB/s y 32 MiB son presupuestos de esta
+spec, conservados del borrador; no son exigencias numéricas de la consigna ni medidas
+obtenidas por leer el código. No se ejecutó este ensayo en la entrega documental.
+
+### NFR-4 · Colas propias acotadas con contrapresión
+
+Cada cola del bridge contiene **≤ 1 MiB**, pausa recepción al llenarse y solo
+reanuda al bajar a **≤ 512 KiB**, bajo cargas de **8 MiB por dirección** del fixture.
+Conservar datos y escrituras parciales no debe duplicarlos. El server responde a
+comandos independientes en ≤ 100 ms durante ambas pausas; kill cancela sin esperar
+consumidor. No se promete una cota sobre todos los buffers del kernel/libssh/tmux ni
+sobre el paste-buffer común, y no se modifica el parser para provocar la pausa.
+
+**VC-27:** dos corridas nuevas separadas, una por dirección. Payload determinista
+8 MiB = 8388608 bytes; productor y verificador registran longitud/hash esperados.
+Contadores `-vv` de colas derivados de sus **longitudes reales después de cada
+mutación** (incluido enqueue, antes de drenar), máximos acumulados y transiciones
+pause/resume, nunca del volumen total transferido ni de una cifra saturada a 1 MiB.
+Leer los call sites nuevos para verificar esa instrumentación; la presencia de una
+línea que dice 1 MiB no prueba que se haya observado el buffer correcto.
+
+- **Remoto → local:** único cliente control adjunto al server, en FIFO; después de
+  comprobar attachment y salida inicial, detener la lectura del FIFO. No mantener
+  un segundo cliente sano: el script base `regress/respawn-pane-control-lag.sh` lo
+  usa para **mantener** lecturas, y no se copia esa parte para inducir presión.
+  Ningún cliente normal/control adicional puede mantener lectura; consultas CLI
+  independientes no quedan adjuntas a una sesión. `server-client.c:1909-1981` y
+  `control.c:325-345` explican la condición real. Pipe/colector siguen vivos para
+  verificar todos los bytes al final. Emitir los 8 MiB y esperar prueba de pausa RX
+  llena; solo **desde** esa evidencia sostener el bloqueo 1 s y reanudar el FIFO.
+  Si no se llenó, el caso no verifica la contrapresión y no se cuenta como PASS.
+- **Local → remoto:** helper remoto prepara PTY raw, sin eco ni traducción de bytes,
+  informa READY y no lee stdin hasta que el driver lo habilita por un FIFO de
+  control separado en TP2_ROOT (loopback comparte ese filesystem), no por el stdin
+  bloqueado ni por comandos pegados después del payload. Cargar el payload
+  mediante `load-buffer` y `paste-buffer -r -S`, sin `-p` de bracketed paste;
+  `cmd-paste-buffer.c:87-123` muestra que el default cambia LF a CR y que las opciones
+  elegidas conservan los bytes. Esta carga temporal del buffer común no es el RSS
+  de VC-18. Esperar pausa TX llena, mantener no-consumo 1 s desde ella y habilitar
+  lectura. El helper recibe exactamente 8388608 bytes y devuelve longitud/hash,
+  restaura el PTY y termina; no se interpreta el payload como comandos de shell.
+
+En cada corrida, máximos propios ≤ 1048576 bytes; al menos una pausa de la dirección
+ensayada con cola llena y una reanudación con cola ≤ 524288. Cola de la otra dirección
+también respeta su máximo. El segmento de salida capturado por pipe o el segmento
+de entrada recibido por helper tiene la longitud/hash previstos; no basta una marca
+final. Exigir fin dentro de 10 s tras habilitar consumidor y server vivo.
+
+Durante la pausa de 1 s, un driver independiente lanza **20** `display-message -p`
+con nonce conocido, una consulta cada 25 ms durante los primeros 500 ms, sin esperar
+a que termine la anterior para lanzar la siguiente. Obtiene stdout exacto/status 0
+en ≤ 100 ms cada uno; usa el mismo reloj/protocolo de VC-16 y registra cuántas muestras caen efectivamente dentro
+de la pausa. Si no entran todas, repetir corrida (no contar muestras posteriores).
+Un cliente control sin consumir puede pausar la lectura común de panes: no exigir
+reflejo de teclas en capture mientras esa política lo impide. Tras reanudar, la
+marca local calculada de VC-16 vuelve a ser visible en ≤ 100 ms. No se relaja la
+respuesta del loop ni se cambian `server-client.c`/control mode para satisfacer un VC.
 
 ## Plan de iteraciones
 

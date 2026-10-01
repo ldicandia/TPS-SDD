@@ -89,6 +89,8 @@ siguen síncronos. Se desactiva `SSH_OPTIONS_PROCESS_CONFIG` para evitar configu
 SSH automática y se obtiene exit status por callback. Fuentes externas en las notas.
 Se usa `event_set`, como tmux, porque el build admite libevent antiguo
 (`configure.ac:281-300`, `compat.h:30-40`). No se probó el bridge ni su rendimiento.
+Medidas propuestas: payload íntegro/hash, reloj monotónico y VmHWM reiniciado.
+Separar contrapresión control de salida visible; no modificar su política común.
 
 ## Sin explorar
 

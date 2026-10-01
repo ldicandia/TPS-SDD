@@ -508,3 +508,76 @@ Se comprobaron los límites de 245 citas de fuentes tmux y se leyeron los bloque
 nuevos; los conteos históricos del paso 1 no se presentan como conteos actuales.
 La copia de tmux sigue limpia en el hash base y `git diff --check` no informa errores.
 Solo se editaron los tres Markdown de TP2; TP1 y el PDF aportado siguen sin cambios.
+
+
+## Mediciones y VCs del paso 6 — 2026-09-30
+
+Se conservan los presupuestos del borrador (100 ms, apertura 10 s, 20 MiB/s,
+32 MiB y colas 1 MiB/512 KiB), y se fijan carga, frontera de tiempo, herramienta,
+unidades, configuración y evidencia. Son criterios propuestos de la spec, no
+números exigidos por la consigna ni resultados inferidos de nombres de APIs.
+Las correcciones TP1 pedían condición de carga y misma métrica en NFR/VC: se aplica
+ese criterio a TP2 sin cambiar los artefactos de TP1 ni repetir la búsqueda GCS.
+
+| Evidencia leída en tmux base | Consecuencia para los VCs |
+|---|---|
+| `tmux.c:331-342` | Precedente de tiempo en milisegundos, con preferencia por CLOCK_MONOTONIC; el fixture exige reloj monotónico y registra intervalos reales |
+| `options-table.c:845-851` | history-limit default 2000; esa carga se fija para rendimiento, separada de la historia 5000 de pruebas funcionales |
+| `window.c:1640-1647`, `cmd-pipe-pane.c:128-167` | Se puede comprobar flujo completo con pipe-pane; el pipe tiene su hijo de instrumentación y no se mezcla con la corrida sin exec de FR-3 |
+| `server-client.c:1909-1981`, `control.c:325-345` | La lectura del pane se pausa cuando todos los clientes control relevantes no aceptan salida; un cliente sano puede impedir esa presión |
+| `regress/respawn-pane-control-lag.sh` | Su segundo cliente sano mantiene lecturas. No se copia ese detalle a un ensayo cuyo objetivo es provocar pausa RX |
+| `cmd-paste-buffer.c:87-123` | Paste cambia LF a CR por defecto; `-r -S`, sin bracketed paste, conserva el payload para prueba raw de entrada |
+
+VC-18 pasa de una marca final a cantidad exacta/hash y confirmación de renderizado,
+con t0 antes de enviar y t1 tras colector/render. Se definen 200 MiB, tres corridas,
+build normal y escenario loopback con historia acotada; monitor externo cuenta solo
+RSS del server, incluidos sus buffers pipe. La documentación
+[oficial de /proc](https://docs.kernel.org/filesystems/proc.html) describe VmRSS/VmHWM,
+reinicio del pico mediante clear_refs=5 y límites de precisión del accounting. El
+reset afecta únicamente al PID de prueba previamente identificado, en un ensayo
+futuro; **no se escribió en /proc durante esta revisión**. Un pico histórico ni RSS
+de otro proceso sirven como prueba de memoria del tramo medido.
+
+NFR-1/VC-16 fija 20 muestras completas y marca que no pasa por eco; con contrapresión
+VC-27 exige respuesta de comandos independientes durante la pausa y salida local
+tras reanudar. No se promete salida visible de un control client que dejó de leer,
+ni se modifica esa política común para hacer pasar la prueba. Pausa se sostiene
+1 s desde la evidencia de cola llena, en vez de suponer que dormir 1 s la llenó.
+Máximos se derivan de longitudes reales, con comprobación de la instrumentación,
+y se verifica hash/longitud en ambas direcciones, sin confundir colas propias con RSS.
+
+BR-2/VC-15 acota la garantía a la identidad importada y logs generados por la función;
+no agrega redacción universal al logging común del pane. Búsqueda de cuerpo de clave,
+encodings y frase canario en archivos/argv se complementa con revisión de call sites
+nuevos. `SSH_OPTIONS_LOG_VERBOSITY` y `SSH_LOG_NOLOG` se comprobaron en el header
+libssh 0.9.0; no se imprimen patrones secretos ni mensajes libres de la biblioteca.
+ASan/LSan se precisan para VC-28 usando la
+[documentación oficial de Clang](https://clang.llvm.org/docs/AddressSanitizer.html);
+se declaran los límites de una dependencia sin instrumentar y se separa ese build
+del ensayo de rendimiento. No se ejecutó ni se instaló esa instrumentación.
+
+Para que los plazos y fallas tardías sean verificables se propone un fixture SSH
+controlable, solo herramienta de test: Python/Paramiko en loopback, sin dependencia
+nueva de producción ni jobs CI. La [API de servidor](https://docs.paramiko.org/en/stable/api/server.html)
+permite decisiones de auth/canal/PTY/shell; la [API de canal](https://docs.paramiko.org/en/stable/api/channel.html)
+separa status, EOF de escritura y CLOSE. Gates detienen/reanudan solo el proceso
+remoto del fixture, sin sleeps en callbacks normales ni bloqueo del cliente tmux.
+Se fija su contrato y se explicita que **no existe todavía un helper verificado**.
+VC-17 prueba que pasar de etapa a +8 s no reinicia el deadline de +10 s; VC-34 cubre
+rechazos de las tres solicitudes. FR-20/VC-35 y FR-21/VC-36 vuelven verificables el
+cierre incompleto de 2 s y la normalización/primer status ya elegidos en el paso 4.
+
+**Verificación realizada:** lectura de fuentes y documentación primaria, revisión
+de métodos de medición y consistencia de la spec. Sin build C, clientes/servidores
+SSH, generación de claves, lectura de secretos, ASan, cronometraje de panes ni
+mediciones de /proc. Este paso no afirma resultados de rendimiento/cierre.
+Quedan el plan de iteraciones del paso 7 y la auditoría final del paso 8; no se
+implementan esas fases ni se declara completa la entrega en esta revisión.
+
+Comprobaciones documentales finales del paso 6: 35 FR/BR/NFR + 8 invariantes y
+43 VCs únicos; referencias a IDs definidas y VC para cada requisito/invariante.
+FRs conservan Dado/Cuando/Entonces; enlaces locales válidos; capsule de 100 líneas.
+Se comprobaron límites de 259 citas de tmux y se leyeron los bloques nuevos; esto
+no reemplaza verificación semántica ni ejecución. Aritmética de payload/MiB/KiB y
+opciones de logging libssh coherentes; base tmux limpia en el hash fijado.
+`git diff --check` sin errores; solo los tres Markdown de TP2 modificados.

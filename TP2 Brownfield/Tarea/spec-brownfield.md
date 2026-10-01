@@ -93,11 +93,13 @@ ni con cada `AGAIN`. La garantía medible usa IP literal y archivos locales acce
 DNS y filesystem siguen síncronos, como se declara en Decisiones. Kill cancela también
 una apertura pendiente, sin esperar ese deadline (FR-11b).
 
-Si fallan pane/layout/socketpair/contexto antes de publicar, se deshace lo creado y
-el comando devuelve 1 con `create pane failed: ` y la causa, como el contrato de
-spawn existente. Una vez publicado, el comando devuelve 0: las fallas posteriores
+Si falla una operación recuperable de pane/layout/socketpair/contexto antes de
+publicar, se deshace lo creado y el comando devuelve 1 con `create pane failed: <causa>`,
+como el contrato de spawn existente. Una vez publicado, el comando devuelve 0: las fallas posteriores
 son asíncronas dentro del pane. No se transfieren recursos al pane en dos pasos que
-permitan callbacks sobre un contexto a medio construir.
+permitan callbacks sobre un contexto a medio construir. Los fallos de memoria
+fatales de las rutinas comunes conservan ese comportamiento, como fija el contrato
+de argumentos; no se promete rollback recuperable después de un fatal del server.
 
 #### Event loop e I/O
 
@@ -446,6 +448,9 @@ scripts/fixtures existentes para hacer pasar las pruebas.
 
 Todo FR asume que `tmux` se compiló con `--enable-ssh` en Linux, salvo FR-9.
 Los contratos siguientes son requisitos propuestos; ningún VC de ejecución se declara aprobado.
+Toda consulta usada como observable debe conservar su exit code y stdout/stderr
+por separado. Exigir exit 0 antes de interpretar una salida vacía o un ID ausente;
+un error de consulta/herramienta no demuestra ausencia de panes, fds ni conexiones.
 
 ### Contrato de argumentos y diagnósticos
 
@@ -720,7 +725,9 @@ con nuevo fixture. No exigir `30 100` si el layout no lo permite. Server vivo y 
 **cuando** se ejecuta `tmux ssh-pane host`,
 **entonces** falla con `unknown command: ssh-pane` y código de salida `1`.
 
-**VC-9:** `tmux ssh-pane x; echo $?` imprime `unknown command: ssh-pane` y `1`.
+**VC-9:** ejecutar `tmux ssh-pane x` y guardar su status antes de otra orden:
+exit 1, stdout vacío y stderr con la línea exacta `unknown command: ssh-pane`.
+Repetir en default-off y `--disable-ssh` de la matriz; no usar el status de un `echo`.
 
 ### FR-10a · Fin de la sesión remota con `remain-on-exit on`: el pane queda con su estado
 
@@ -746,7 +753,11 @@ bridge fija `status`/`PANE_STATUSREADY` antes del EOF local (`server-fn.c:382`).
 **cuando** la shell remota termina con `exit 7`,
 **entonces** el pane se destruye y no queda colgado.
 
-**VC-10b:** en ≤ 2 s, `tmux list-panes -a -F '#{pane_id}' | grep -cx '<pane>'` da `0`.
+**VC-10b:** dentro de 2 s desde `exit 7`, guardar status/stdout/stderr de
+`tmux list-panes -a -F '#{pane_id}'`: exit 0 y ninguna línea igual al ID registrado
+del pane SSH. El ID del pane local sigue presente y una consulta a ese pane sale 0;
+el server sigue vivo. No interpretar `grep -c` igual a 0 después de una consulta
+fallida o un server caído como destrucción correcta del pane.
 
 ### FR-11 · Matar el pane libera la sesión
 
@@ -993,7 +1004,16 @@ permite enviar status y cerrar por separado; no es una API de tmux ni de libssh.
 
 ### BR-1 · `known_hosts` es solo lectura
 
-`tmux` nunca escribe en `known_hosts` ni en ningún archivo bajo `~/.ssh`.
+El acceso a archivos de la **función SSH** es solo lectura: no escribe en
+`known_hosts` ni crea/modifica archivos bajo `~/.ssh` de la cuenta del server.
+
+**Fundamento:** la confianza debe estar preparada por el usuario; abrir un pane no
+aprende hosts ni modifica credenciales. Esto preserva la política de rechazo de
+FR-6a/FR-6b/FR-18 y evita efectos persistentes de una conexión.
+**Excepciones:** ninguna para la función SSH. La preparación explícita del fixture
+ocurre antes de medir y no es una operación de esa función. Los comandos existentes
+de tmux y su logging común mantienen su comportamiento; esta regla no prohíbe, por
+ejemplo, que el usuario elija un archivo mediante `save-buffer`.
 
 **VC-14:** adjuntar `strace -f -e trace=openat,open,creat,rename,renameat,unlink,unlinkat`
 al server existente **antes** del escenario y guardar la traza en TP2_ROOT. Ejecutar
@@ -1012,8 +1032,10 @@ una clave con frase falla sin interacción. Libssh se configura con
 no volcados de paquetes/estructuras privadas de libssh. Esas opciones existen en
 sus headers 0.9.0.
 
-Fundamento: fallas reproducibles y colas observables no requieren registrar secretos.
-Límite: el logging existente de tmux puede registrar comandos/salida del pane;
+**Fundamento:** fallas reproducibles y colas observables no requieren registrar secretos.
+**Excepciones:** ninguna para contenido de clave/frase en logs/argv de la función.
+La ruta de identidad permitida no es ese contenido ni autoriza exponerlo.
+**Límite:** el logging existente de tmux puede registrar comandos/salida del pane;
 esta regla no promete redactar cualquier secreto que el usuario teclee o que un
 remoto envíe como datos. No se modifica ese logging común ni se le atribuye al bridge
 una garantía sobre contenido arbitrario. Las claves del fixture no se teclean ni se
@@ -1422,8 +1444,9 @@ no editar un comando existente, un fixture heredado o una métrica para ocultarl
 
 **Estado de esta entrega:** plan y cobertura revisados documentalmente. Ninguna
 iteración de implementación, build/regresión, fixture SSH o presupuesto fue ejecutado
-como parte del TP2. La siguiente revisión de esta entrega es la auditoría documental
-final, que confronta consigna, notas, spec y capsule; no ejecuta este plan de C.
+como parte del TP2. La auditoría final de los artefactos disponibles está registrada
+en las notas, apartado del paso 8, con sus límites. Este plan de C sigue siendo
+futuro; la revisión documental no acredita los resultados de sus VCs de ejecución.
 
 ## Decisiones — resueltas
 
@@ -1434,6 +1457,6 @@ final, que confronta consigna, notas, spec y capsule; no ejecuta este plan de C.
 | ¿`libssh` u OpenSSH? | **`libssh` ≥ 0.9**, enlace dinámico; LGPL-2.1-or-later | La consigna prohíbe invocar el binario. La API usada existe en 0.9.0 según sus headers; es una dependencia externa solo del build opt-in, siguiendo `configure.ac:512-514`. El mínimo de API no afirma que 0.9.0 sea una versión aconsejada para despliegue |
 | ¿Event loop? | `socketpair` + libssh no bloqueante + `event_set` | Reutiliza fd + `bufferevent` (INV-7) y el precedente `server.c:424-426`; descarta TCP crudo como fd del pane y un hilo aparte. Evita exigir libevent 2 para una base que admite 1.4 |
 | ¿Auth por claves o agent? | **Solo clave sin frase con `-i`**, sin prompts ni agent | Decisión confirmada en la revisión: la consigna permite elegir claves; el agent de libssh 0.9.0 hace esperas bloqueantes aun con la sesión no bloqueante. Evita ampliar la arquitectura con hilos/adaptadores; verifica el host antes de autenticar y usa `known_hosts` solo lectura |
-| ¿Qué guarda saca a no-Linux? | **`--enable-ssh` opt-in** que falla en no-Linux, **más** `#ifdef ENABLE_SSH_PANE` | Es el patrón de `--enable-systemd`/`--enable-cgroups` |
+| ¿Qué guarda saca a no-Linux? | **`--enable-ssh` opt-in** que falla en no-Linux, **más** `#ifdef ENABLE_SSH_PANE` | Reutiliza la dependencia opcional de `--enable-systemd`/`--enable-cgroups`; SSH agrega su propio rechazo temprano por `$host_os`, ausente en ese precedente |
 | ¿Se resuelve DNS sin bloquear? | **No.** Se documenta como limitación | Confirmado en la fuente libssh 0.9.0: `getaddrinfo` se ejecuta antes de la conexión asíncrona; por eso NFR-1 mide con IP literal. La lectura de clave y `known_hosts` también es síncrona: no se promete latencia acotada de DNS o del filesystem |
-| ¿Se acepta un host desconocido? | **No** | Aceptar sin preguntar es un MITM; no hay TTY para preguntar |
+| ¿Se acepta un host desconocido? | **No** | Aceptarlo permitiría suplantación del host. La v1 exige confianza previa y excluye prompts/TOFU; un pane nuevo no aprende claves |

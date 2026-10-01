@@ -636,3 +636,108 @@ Dado/Cuando/Entonces; enlaces relativos válidos y capsule de 100 líneas. Se
 comprobaron límites de 265 citas de tmux; la base sigue limpia en el hash fijado.
 `git diff --check` sin errores; solo los tres Markdown de TP2 modificados. Estos
 controles de texto no sustituyen ejecución ni certifican las métricas futuras.
+
+
+## Auditoría documental final del paso 8 — 2026-09-30
+
+**Resultado:** revisión de los tres artefactos TP2 cerrada sobre las fuentes
+disponibles, con los ajustes de abajo. El alcance sigue siendo análisis/spec para
+SSH nativo en tmux, solo Linux; no se entrega implementación ni se declaran VCs de
+ejecución aprobados. Este resultado no es una calificación del profesor.
+
+### Fuentes y tratamiento de instrucciones
+
+La consigna TP2 del repo coincide byte a byte con `Downloads/enunciado.md` (`cmp`,
+exit 0). Se releen también la consigna TP1, las correcciones pegadas y el ejemplo
+guiado. La solicitud del usuario delimita el trabajo: corregir estos documentos,
+conservar las decisiones aceptadas, no modificar TP1 ni repetir su búsqueda GCS.
+La obligación de implementar gcsgrep en TP1 no se traslada a SSH en TP2.
+
+| Material | Uso en esta revisión |
+|---|---|
+| Consigna TP2 | Define el entregable y sus límites: análisis/spec, comando nuevo, sin binario ssh, Linux y preservación de builds/comandos/PTY |
+| Consigna TP1 y correcciones pegadas | Contexto del mismo proyecto y criterios de claridad: observables, contratos completos, carga/métrica y decisiones fundamentadas. Sus MUST/SHOULD/COULD sobre gcsgrep no ordenan editar TP1 en esta fase |
+| Ejemplo guiado de fzf | Forma de los tres artefactos. El prompt citado, clone/comandos y «No uses tmux» pertenecen a ese ejemplo/ejercicio adicional; no sustituyen la tarea tmux ni se ejecutan |
+| Código tmux del hash fijado | Evidencia de rutas, funciones y comportamiento existente, no instrucciones para hacer merges/pushes de `SYNCING.md` |
+| Libssh 0.9.0 y documentación primaria ya registrada | Evidencia externa de API/políticas/medición, distinguida de fuentes tmux y de resultados de ejecución |
+
+No se encontraron, en los textos releídos, pedidos para ignorar instrucciones del
+usuario, revelar secretos, ejecutar acciones ajenas o falsificar evidencia. Las
+órdenes aparentes se evaluaron por origen/contexto; no se obedecen por estar en un
+adjunto ni por usar MUST. Una indicación ambigua o contradictoria no amplía el alcance.
+Esta revisión contextual no afirma haber inspeccionado material que falta.
+
+**Límite de criterios:** `Downloads/CRITERIOS DE CORRECCION.md` sigue ausente y no
+se encontró otra copia por nombre en Downloads/attachments. Se aplican los criterios
+de ejemplo registrados en pasos anteriores y las correcciones pegadas, disponibles.
+No se acredita una nueva comparación íntegra ni detección de instrucciones sospechosas
+en ese archivo ausente; tampoco se lo presenta como criterio final del profesor.
+
+### Correspondencia con la consigna y correcciones previas
+
+| Punto | Evidencia en los artefactos revisados |
+|---|---|
+| Spawn y proceso existentes | Notas trazan tabla → exec del comando → spawn → fdforkpty → hijo/complete/evento; cinco sitios de llamada y definición confirmados en la base |
+| Portabilidad y cambio acotado | Notas describen configure/compat/osdep/guardas y sincronización OpenBSD. Spec identifica fuentes nuevas y cambios compartidos, excluyendo compat/osdep/CI/parser/protocolo/comandos existentes |
+| Seis decisiones requeridas | Tabla de diseño de las notas con elegido/descartado/fundamento; tabla final de la spec consistente. Claves `-i` mantiene la elección explícita del usuario |
+| Límite Linux y preservación | Opción default off, rechazo temprano por host_os y guardas; INV-1 a INV-8 con VC-19 a VC-26, matriz y comparación con la base. No se confunde definir esos controles con haberlos pasado |
+| Contrato observable | CLI/defaults/validación y errores síncronos/asíncronos fijados; FRs Dado/Cuando/Entonces con VC, variantes de fallas y recorrido con shell real previsto |
+| Reglas y fundamento | BR-1/BR-2 declaran fundamento/excepciones/límites; confianza solo lectura y clave importada sin exposición, manteniendo funciones comunes |
+| NFRs medibles | Latencia 100 ms, apertura 10 s, 200 MiB en 10 s/RSS +32 MiB y colas 1 MiB/512 KiB con carga/herramienta/métrica coincidentes. Son presupuestos propios de la spec, no números impuestos por la consigna |
+| Cobertura y handoff | 35 FR/BR/NFR + 8 invariantes, 43 VCs y filas de cobertura; iteraciones futuras separadas de los pasos documentales; capsule de 100 líneas |
+
+### Ajustes cerrados en esta revisión
+
+- **A8-1 · Reglas incompletas/alcance excesivo:** BR-1 no explicitaba fundamento ni
+  excepciones y atribuía a todo tmux una prohibición de escribir bajo `.ssh`. Se
+  precisa el acceso de la función SSH, sin cambiar `save-buffer`/logging común.
+  BR-2 explicita excepciones y conserva su límite frente a datos arbitrarios del pane.
+- **A8-2 · Ausencia confundida con éxito:** VC-10b podía obtener conteo 0 de un pipe
+  aunque `list-panes` fallara. Ahora requiere consulta exit 0, ID SSH ausente,
+  pane local presente y server vivo. VC-9 separa status/stdout/stderr; el protocolo
+  general exige éxito de consultas antes de interpretar ausencia como observable.
+- **A8-3 · Resumen susceptible de lectura incorrecta:** la tabla final de decisiones
+  explicita que systemd/cgroups no aporta el rechazo por SO y que SSH lo agrega.
+  Rechazar hosts desconocidos es política de confianza previa sin prompts/TOFU;
+  se elimina la justificación imprecisa sobre disponibilidad de TTY. El rollback
+  antes de publicar se precisa para fallas recuperables, conservando los fatales
+  de memoria de las rutinas comunes ya declarados en el contrato de argumentos.
+- **A8-4 · Estado pendiente ya histórico:** el final del plan deja de anunciar esta
+  auditoría como siguiente paso y remite a este registro. Los registros 1–7 conservan
+  sus conteos/límites de ese momento; no se presentan como estado actual.
+
+La evidencia de estos cierres es documental: texto corregido y consistencia con los
+contratos existentes. Las pruebas de comportamiento siguen para el implementador;
+no se cierra un VC de ejecución por corregir su descripción.
+
+### Evidencia de cierre y límites
+
+| Comprobación efectivamente realizada | Resultado |
+|---|---|
+| IDs/BDD/reglas/cobertura | 29 FR + 2 BR + 4 NFR, 8 invariantes, 43 VCs únicos y 43 filas exactas. Sin IDs sin definición en los tres documentos; cada fila coincide con su VC principal; distribución 1/24/7/11 |
+| Rutas | 54 archivos concretos tmux y 10 patrones con coincidencias. 14 rutas externas libssh distinguidas; dos fuentes nuevas/un patrón de tests/ruta descartada no se cuentan como existentes. `config.h` es generado y `event.h` es header de dependencia, no archivos fuente de la base |
+| Rangos y nombres | 271 apariciones de citas numéricas, 163 anclas distintas, con archivo/rango válido, incluyendo YAML. 42 nombres internos presentes en fuente/header tmux y 27 nombres SSH en libssh; presencia léxica no prueba semántica/integración |
+| Conteos de la base | 153 C de raíz, 101.303 líneas; 46 archivos compat; 172 scripts regress y 155 con readlink literal. Definición más cinco sitios de llamada a spawn_pane, como indican las notas |
+| Fuente externa | SHA-256 del archivo libssh coincide con el fijado. Identificadores/fuentes propuestos no existen en la base tmux, como declara la spec |
+| Enlaces y capsule | Enlaces relativos de los tres documentos resuelven; capsule de 100 líneas |
+| Alcance Git | `git diff --name-status af207f842e678b5fc1f6e69c5bf6bc72d9d9dd4d` enumera solo los tres Markdown de TP2 para toda esta revisión. Checkout tmux limpio en su hash base; el PDF no versionado permanece fuera del cambio |
+
+El control de nombres se repitió tras distinguir `ssh_config`/`ssh_known_hosts`,
+que son nombres de archivos, de los símbolos SSH. Una coincidencia por nombre o
+un rango dentro del archivo no sustituye lectura: se contrastaron además los
+bloques críticos de spawn/resize/cierre/respawn/guardas y las políticas externas.
+No se afirma que las 271 citas sean 271 funciones ni 271 tests pasados; los conteos
+anteriores pertenecen a sus respectivas revisiones históricas.
+
+Se ejecutaron comprobaciones de texto/fuente, `cmp` de la consigna y controles Git;
+`git diff --check` termina con exit 0. No se compiló C, arrancó tmux/sshd, generó una
+clave, midió RSS/latencia ni ejecutó una regresión/VC SSH. No se modificó TP1, una
+cuenta/archivo SSH personal, CI ni el código tmux. Los fixtures y mediciones de la
+spec siguen propuestos; falta evidencia de ejecución si se implementa en el futuro.
+
+**Handoff:** los pasos documentales 1–8 quedan revisados; no quedan contradicciones
+documentales materiales detectadas en las fuentes disponibles tras estos ajustes.
+Permanece el límite de no poder releer el archivo original de criterios de ejemplo.
+Este cierre no certifica ese documento ausente, una evaluación futura del profesor
+ni funcionamiento del cliente SSH. La siguiente acción sobre estos cambios es su
+revisión/commit cuando el usuario lo solicite; no se inicia la implementación de C.

@@ -2,7 +2,7 @@
 
 > Descubrimiento destilado de [`notas-exploracion.md`](./notas-exploracion.md) y
 > [`spec-brownfield.md`](./spec-brownfield.md) para la próxima tarea sobre `tmux`.
-> Commit base `5e4b8cc39e635f8e2c4d9c95c205e987a618d50b`. Referencias revisadas el
+> Commit base `5e4b8cc39e635f8e2c4d9c95c205e987a618d50b`. Referencias auditadas el
 > 2026-09-30 en una copia sin modificaciones. **Sin compilación ni pruebas de ejecución**.
 
 ## Qué se especificó

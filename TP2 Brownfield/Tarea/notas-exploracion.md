@@ -112,6 +112,11 @@ También hay **otro llamador interno de `spawn_pane` en `spawn.c:772`**;
 son todos los sitios de llamada encontrados al buscar `spawn_pane(` en los `.c` de la raíz.
 Cualquier cambio en su contrato debe preservar esos caminos sin `SPAWN_SSH`.
 
+**Hallazgo:** `respawn-window` (`cmd-respawn-window.c:82`) entra por `spawn_window` con
+`SPAWN_RESPAWN`. Ahí se toma el primer pane como `wp0`, se destruyen los demás con
+`window_destroy_panes` y se reinicia el layout (`spawn.c:143-154`) **antes** de llamar a
+`spawn_pane`. Un rechazo puesto solo en `spawn_pane` llegaría con la ventana ya mutada.
+
 ### 4 · Cómo se conecta un pane a un fd: `window.c`
 
 La interfaz de lectura y escritura del pane es **`wp->fd` + un `bufferevent`**.
@@ -174,6 +179,11 @@ superficie y excluye SSH de las tres operaciones utempter.
   (`format.c:2293-2294`): espera un estado codificado como el de `waitpid`, no el código
   remoto crudo. La representación propuesta debe respetar ese contrato.
 - `cmd-find.c:89` compara `wp->tty` con `c->ttyname` para resolver "el pane de este cliente".
+- `format_cb_current_command` y `format_cb_current_path` llaman `osdep_get_name`
+  (`format.c:966`) y `osdep_get_cwd` (`format.c:990`), que en Linux usan `tcgetpgrp(fd)`
+  (`osdep-linux.c:38`, `osdep-linux.c:71`). Sobre un socket fallan sin error fatal:
+  `#{pane_current_command}` cae al argv o a la shell local configurada (y con ella el
+  nombre automático de la ventana) y `#{pane_current_path}` queda vacío.
 
 Si el bridge asigna `pid == -1` y conserva `tty` vacío, **`#{pane_pid}` mostraría `-1`
 mientras el fd esté abierto** y `#{pane_tty}` cadena vacía. Con el fd cerrado, `pane_pid`
@@ -284,7 +294,7 @@ opcional en un archivo compartido**, y la que hay que usar en `spawn.c`, `window
 | ¿Dónde engancha en spawn? | Ramificar en **`spawn_pane`** con un flag nuevo `SPAWN_SSH` (`0x2000`), junto a la rama de `SPAWN_EMPTY` (`spawn.c:459`) | Función paralela que duplique la creación de pane | `spawn_pane` ya arma layout, entorno, `window_pane_set_event` y los hooks `pane-created`; duplicarlo diverge del upstream |
 | ¿`libssh` u OpenSSH? | **`libssh` ≥ 0.9**, vía `pkg-config`, enlace dinámico | Invocar `ssh` | La consigna prohíbe el binario. API mínima y LGPL-2.1-or-later verificadas en la fuente externa; dependencia opcional según `configure.ac:512-514` |
 | ¿Cómo entra al event loop? | **`socketpair(AF_UNIX)`**: un extremo es `wp->fd`, el otro lo maneja el *bridge* con `libssh` en modo no bloqueante y `event_set` sobre `ssh_get_fd()` | `wp->fd` = socket TCP crudo; hilo aparte | Deja `window_pane_set_event`, `input_parse_pane` y las escrituras (**§4**) **sin cambios**; el pane sigue siendo "un fd + un `bufferevent`" |
-| ¿Auth? | **Solo clave sin frase con `-i`** | Agent, contraseña y teclado interactivo | La consigna permite claves o agent. La fuente externa confirma esperas bloqueantes del agent de 0.9.0; decisión del usuario: claves, para mantener una v1 simple. No cambia la construcción del entorno en `spawn.c:408` |
+| ¿Auth? | **Solo clave sin frase con `-i`** | Agent, contraseña y teclado interactivo | La consigna permite claves o agent. La fuente externa confirma esperas bloqueantes del agent de 0.9.0; decisión del equipo: claves, para mantener una v1 simple. No cambia la construcción del entorno en `spawn.c:408` |
 | ¿Qué guarda deja afuera a no-Linux? | **Dos capas**: (1) `configure` con `--enable-ssh` opt-in que aborta en no-Linux; (2) `#ifdef ENABLE_SSH_PANE` en todo el código | Solo `#ifdef __linux__` | Reutiliza el patrón de dependencia opcional y agrega el rechazo por `host_os`. El objetivo es no introducir dependencias ni fallos por SSH en builds que no lo activan; aún debe verificarse al implementar |
 | ¿Dónde vive el código nuevo? | **Raíz**: `cmd-ssh-pane.c` y `ssh-pane.c` (**propuestos, nuevos**, patrón sixel) | Crear `compat/ssh-pane.c` (**alternativa descartada; no existe**) | `compat/` es para tapar agujeros de SO; esto es una feature con un comando y usa `struct window_pane` |
 
@@ -297,6 +307,7 @@ opcional en un archivo compartido**, y la que hay que usar en `spawn.c`, `window
 | **Bloqueo del event loop** | El loop del server atiende otros panes (`window.c:1632`, `server.c:424`). DNS y lectura de archivos siguen síncronos; se registran como limitaciones. Agent excluido y exit status por callback para evitar otras esperas verificadas en libssh |
 | **Fuga de fds/sesiones** | `window_pane_destroy` (`window.c:1567`) no conoce el bridge propuesto; además `server_destroy_pane` conserva el pane con `remain-on-exit` (`server-fn.c:420`), sin llamar al destructor |
 | **`respawn-pane` sobre un pane SSH** | `spawn.c:312-349` libera el evento/fd y reutiliza `wp0`; con `-k` continuaría al fork local. El rechazo SSH debe preceder esa mutación |
+| **`respawn-window` sobre una ventana con pane SSH** | `spawn.c:143-154` destruye los demás panes antes de `spawn_pane`; el rechazo SSH debe ir en `spawn_window`, antes de esa mutación (FR-22) |
 | **Registro utempter sobre un socket** | El alta (`spawn.c:581`) y las bajas (`window.c:1581`, `server-fn.c:367`) reciben el fd sin reconocer un transporte SSH; la spec excluye SSH del alta y ambas bajas |
 | **Confianza en el host** | Riesgo de diseño SSH: aceptar hosts desconocidos permite suplantación. No es un mecanismo de SSH encontrado en tmux ni una prueba ejecutada |
 | **Conflictos de merge con OpenBSD** | `spawn.c`, `window.c`, `cmd.c` se sincronizan desde OpenBSD (`SYNCING.md`) |
@@ -335,409 +346,71 @@ sed -n '3,6p;25,37p' .github/workflows/regress.yml      # disparadores y platafo
 git diff --exit-code                                 # código de la copia sin modificaciones
 ```
 
-## Registro de verificación de referencias del paso 1 — 2026-09-30
+## Validación externa: libssh 0.9.0 y documentación primaria
 
-Registro histórico del contenido consolidado en el commit `28cc9fd`, **antes** de
-los ajustes del paso 2. Sus conteos no describen las referencias agregadas después.
+Fuentes: [archivo oficial de libssh 0.9.0](https://www.libssh.org/files/0.9/libssh-0.9.0.tar.xz)
+(SHA-256 `25303c2995e663cd169fdd902bae88106f48242d7e96311d74f812023482c7a5`),
+[guía de enlace de libssh](https://api.libssh.org/stable/libssh_linking.html),
+[compatibilidad de eventos de libevent](https://libevent.org/libevent-book/Ref4_event.html#_obsolete_event_manipulation_functions)
+y [RFC 4254, §5.3 y §6.10](https://www.rfc-editor.org/rfc/rfc4254.html). El archivo se
+extrajo en una copia temporal y solo se leyeron fuentes y headers; no se compiló ni se
+ejecutó. Las rutas de esta tabla pertenecen **a libssh 0.9.0, no a tmux**. El mínimo
+0.9 es de **API**, no una recomendación de desplegar esa versión histórica.
 
-| Chequeo | Resultado de esa revisión documental |
+| Evidencia externa | Consecuencia para la spec |
 |---|---|
-| Base | Checkout en el hash completo del encabezado; `git status --short` vacío y `git diff --exit-code` con salida 0 |
-| Rutas (M2) | 49 archivos concretos citados existen en tmux; los 9 patrones de archivos existentes tienen coincidencias. Las rutas de documentos locales también resuelven |
-| Propuestas | Dos fuentes nuevas, un patrón de scripts nuevos y una ruta alternativa descartada están identificados como tales; no se cuentan como archivos existentes |
-| Funciones (M2) | Las funciones internas nombradas se localizaron en su definición; las llamadas a APIs del sistema/libevent se distinguieron de las APIs externas propuestas y del nuevo identificador de comando |
-| Líneas (M3), notas + spec | 182 apariciones de citas explícitas con línea, correspondientes a 139 anclas distintas: 182 exactas, 0 desplazadas dentro de ±5 y 0 incorrectas. En rangos se leyó el bloque completo, no solo sus extremos |
-| Consistencia de la capsule | 30 citas adicionales revisadas; se corrigieron las afirmaciones heredadas sobre I/O, resize, estado de salida, CI y lectura del parser |
-| Límites | Sin resultados de build, regresión ni SSH. La revisión de contratos, invariantes y dependencias de los pasos siguientes sigue abierta; estos conteos no son un veredicto general de la entrega |
+| `include/libssh/libssh.h`, `include/libssh/callbacks.h` | Existen las APIs elegidas: sesión no bloqueante, fd/poll flags, importación de clave, auth por clave, known hosts, PTY/shell, lectura no bloqueante, resize, poller con timeout y callbacks de canal. Existir no prueba integración |
+| Cabecera de `libssh.h` y `COPYING` | LGPL-2.1-or-later; se propone enlace dinámico |
+| `src/agent.c` (`agent_talk`), `src/auth.c` (`ssh_userauth_agent`) | El agent espera con `ssh_poll(..., -1)` aun con la sesión no bloqueante: se descarta agent en la v1 y se usa `-i` |
+| `src/connect.c`, `getai` | `getaddrinfo` es síncrono; NFR-1 mide con IP literal y declara DNS/filesystem fuera de la cota |
+| `src/options.c`, `SSH_OPTIONS_PROCESS_CONFIG`, PORT, `user@host` | La configuración SSH se procesa si no se desactiva; PORT se enmascara a 16 bits y se acepta `user@host`. La spec desactiva la configuración y valida host/puerto antes de pasarlos |
+| `src/misc.c`, `ssh_get_user_home_dir`; `src/knownhosts.c` | Se usa `getpwuid_r` antes de HOME y puede aceptarse el archivo global. La spec fija el global en `/dev/null`, verificación estricta y solo `SSH_KNOWN_HOSTS_OK` |
+| `src/pki_crypto.c`, `src/pki_container_openssh.c` | Importar con frase/callback nulos puede pedir frase por terminal: se exige importación sin interacción |
+| `src/channels.c`: `ssh_channel_get_exit_status`, `ssh_channel_read_nonblocking`, `ssh_channel_is_eof`, `channel_write_common`, `ssh_channel_window_size`, `channel_rcv_close`, solicitudes PTY/shell | El getter de status puede bloquear (se usa callback); 0 bytes no es EOF; escrituras parciales; CLOSE puede conservar datos; las solicitudes se repiten tras AGAIN sin recrear el canal |
+| `src/poll.c` (`ssh_event_*`), `src/client.c` (`ssh_disconnect`), `src/session.c` (`ssh_free`) | Poller con timeout 0 y separado antes de liberar la sesión; tras `ssh_disconnect` no se libera de nuevo el canal |
+| `SSH_OPTIONS_LOG_VERBOSITY`, `SSH_LOG_NOLOG` en `libssh.h` | Base de BR-2: la biblioteca no vuelca paquetes en los logs |
+| Documentación de libevent | `event_new` no existe antes de 2.0: se usa `event_set`, como tmux |
 
-Se cuentan apariciones repetidas para M3 y se informa también la cantidad de anclas
-distintas. Los patrones, las rutas nuevas/descartadas, los headers externos y las rutas
-del repositorio externo de OpenBSD no se presentan como archivos concretos de esta copia.
+Para el fixture de pruebas se contrastaron, sin ejecutarlos, los manuales oficiales de
+[sshd](https://man.openbsd.org/sshd) y [sshd_config](https://man.openbsd.org/sshd_config),
+la documentación de [/proc](https://docs.kernel.org/filesystems/proc.html) (VmRSS/VmHWM,
+`clear_refs`), [AddressSanitizer](https://clang.llvm.org/docs/AddressSanitizer.html) y
+las APIs de [servidor](https://docs.paramiko.org/en/stable/api/server.html) y
+[canal](https://docs.paramiko.org/en/stable/api/channel.html) de Paramiko. El helper
+Paramiko es una herramienta de test propuesta; **no existe todavía**.
 
-## Validación externa y cierre de decisiones del paso 2 — 2026-09-30
+## Evidencia adicional de tmux usada por la spec
 
-Fuentes primarias: [archivo oficial de libssh 0.9.0](https://www.libssh.org/files/0.9/libssh-0.9.0.tar.xz),
-[guía de enlace de libssh](https://api.libssh.org/stable/libssh_linking.html) y
-[compatibilidad de eventos de libevent](https://libevent.org/libevent-book/Ref4_event.html#_obsolete_event_manipulation_functions).
-El archivo descargado tiene SHA-256
-`25303c2995e663cd169fdd902bae88106f48242d7e96311d74f812023482c7a5`.
-Se extrajo en una copia temporal y solo se leyeron fuentes y headers. Las rutas de la
-siguiente tabla pertenecen **a libssh 0.9.0, no a tmux**:
+Leída en el mismo commit base, además de lo descrito en las secciones anteriores:
 
-| Evidencia externa | Resultado y consecuencia para la spec |
+| Ancla | Consecuencia |
 |---|---|
-| `include/libssh/libssh.h`, declaraciones de opciones y funciones; `include/libssh/callbacks.h`, callbacks de canal | Existen las APIs elegidas: sesión no bloqueante, fd/poll flags, importación de clave, auth por clave, known hosts, PTY/shell, lectura no bloqueante, resize, poller con timeout y callback de exit status. Comprobar declaraciones no demuestra integración ni funcionamiento |
-| Cabecera de `include/libssh/libssh.h` y `COPYING` | LGPL 2.1 o posterior; se precisa LGPL-2.1-or-later y enlace dinámico. La distribución deberá cumplir sus condiciones; no se afirma que cambiar solo el nombre de licencia pruebe ese cumplimiento |
-| `src/agent.c`, `atomicio`, `agent_talk`; `src/auth.c`, `ssh_userauth_agent` | El agent usa lectura/escritura síncrona y ante `EAGAIN` espera con `ssh_poll(..., -1)`. `ssh_set_blocking(session, 0)` y un fd de agent no bloqueante no eliminan esa espera. Se descarta agent para la v1, por decisión explícita del usuario, en favor de `-i` |
-| `src/connect.c`, `getai` | `getaddrinfo` sigue siendo síncrono; para IP literal se usa `AI_NUMERICHOST`. Se conserva la limitación DNS y la prueba de event loop con IP literal; la lectura de archivos también queda fuera de esa garantía de latencia |
-| `src/client.c`, `ssh_connect`; `src/options.c`, opción `SSH_OPTIONS_PROCESS_CONFIG` | libssh procesa configuración automáticamente si no se desactiva. La spec exige desactivar esa opción antes de conectar, para respetar la exclusión de configuración SSH/ProxyCommand y no incorporar capacidades por defecto |
-| `src/pki_crypto.c`, `pki_private_key_from_base64`; `src/pki_container_openssh.c`, `pki_private_key_decrypt` | Importar con frase y callback nulos puede solicitar una frase por terminal. La spec exige importación sin interacción y fallo de autenticación para clave con frase, ilegible o inválida |
-| `src/channels.c`, `ssh_channel_get_exit_status` y su advertencia | El getter puede bloquear. Se elige el callback de exit status en el loop del server, sin esa llamada |
+| `environ.c:264-269`, `spawn.c:408` | TERM sale de `default-terminal`; se copia al contexto antes de liberar el entorno |
+| `window.c:495-512`, `window.c:1660-1669` | El cierre espera datos pendientes y `PANE_EXITED`: el bridge entrega EOF después de la salida |
+| `server-client.c:1909-1981`, `control.c:325-345` | Clientes control que no leen pausan la lectura del pane; NFR-1/NFR-4 no prometen salida en ese caso |
+| `arguments.c:208-282`, `cmd.c:527-537`, `arguments.c:687-699` | Parser común, mensajes de flags/aridad y "último valor gana" se conservan |
+| `layout.c:1640-1700` (`-p` en `layout.c:1658-1680`) | `-p` es porcentaje para el helper: el comando SSH le pasa solo `-l` |
+| `arguments.c:998-1037`, `arguments.c:1067-1108` | Gramática y rangos de tamaño de la base |
+| `spawn.c:292-306`, `server-client.c:2926-2941` | La identidad relativa se ancla al cwd efectivo del pane |
+| `cmd-split-window.c:33`, `cmd-split-window.c:69`, `cmd-split-window.c:306-310` | Target, selección y template `-P` tomados como precedente, sin editar split-window |
+| `tmux.c:331-342` | Precedente de reloj monotónico para medir tiempos |
+| `options-table.c:845-851` | `history-limit` default 2000, usado en NFR-3 |
+| `window.c:1640-1647`, `cmd-pipe-pane.c:128-167` | `pipe-pane -O` permite verificar la salida completa; crea su propio hijo |
+| `cmd-paste-buffer.c:87-123` | `paste-buffer -r -S` conserva los bytes; el default cambia LF por CR |
+| `spawn.c:143-154`, `cmd-respawn-window.c:82-83` | `respawn-window` muta la ventana antes de `spawn_pane`: FR-22 rechaza antes |
+| `regress/Makefile:27-29`, `regress/pane-ops.sh`, `regress/window-ops.sh`, `regress/respawn-pane-control-lag.sh` | El runner borra logs previos; scripts locales usados por VC-23 |
 
-No se exige una nueva versión de libevent: su documentación confirma que `event_new`
-no existe antes de 2.0 y describe `event_set`, ya usado por tmux. La superficie se amplía
-solo con `server-fn.c` para cubrir `remain-on-exit` y la baja utempter; el contrato de
-propiedad/cierre se centraliza en la spec. No se agrega implementación, hilos, workers,
-resolución DNS asíncrona ni nuevos jobs de CI. El mínimo libssh 0.9 es de **API**, no una
-recomendación de desplegar esa versión histórica. Build, regresión y rendimiento siguen
-sin ejecutar; los VCs de invariantes y el resto del plan requieren sus pasos posteriores.
+## Qué se verificó y cómo
 
-## Revisión documental de invariantes del paso 3 — 2026-09-30
-
-Se contrastaron los ocho invariantes con la base y los criterios de ejemplo. El
-protocolo de la spec incorpora VC-19 a VC-26: todos comparan contra el hash tmux
-fijado, cubren off/on y distinguen herramientas/flags por plataforma. Se corrigen
-el `configure` mínimo de macOS, la equivalencia binaria no justificada, los diffs
-contra un working tree que podría estar limpio y la inspección de enlace con `strings`.
-
-Se leyeron el runner `regress/Makefile`, sus logs y entorno, y los scripts reales
-`regress/pane-ops.sh`, `regress/window-ops.sh` y `regress/respawn-pane-control-lag.sh`.
-La baseline usa ese runner y conserva los scripts/fixtures existentes: exige cero
-fallos nuevos, en vez de rechazar una mejora porque cambie el conjunto de fallos.
-Las comprobaciones de panes locales incluyen PTY, resize, respawn, cierre y el par
-utempter. **No se ejecutaron** build, preprocesado, inspección de binarios, wrappers
-de pkg-config, regresiones ni esos escenarios de panes; son el protocolo verificable
-para una implementación posterior. Esta revisión no es un veredicto global de la spec:
-contratos del bridge y el resto de FRs/NFRs/VCs tienen sus pasos siguientes.
-
-## Contrato del bridge del paso 4 — 2026-09-30
-
-Se mantiene comando nuevo, Linux opt-in y transporte fd + `bufferevent`. La spec
-centraliza estados conceptuales, copia de parámetros/TERM, apertura diferida, I/O
-parcial, contrapresión, resize pendiente y cierre/cancelación. No son interfaces
-existentes de tmux ni una implementación entregada. Se precisó NFR-2 como un único
-deadline de apertura hasta shell activa; FR-11b cubre kill durante apertura, FR-14
-pérdida activa y NFR-4 las dos colas propias. No se agrega una cota global de buffers
-que la interfaz común de teclado/pegado no podría garantizar sin ampliar el alcance.
-
-Evidencia adicional de tmux: `environ.c:264-269` fija TERM a partir de default-terminal;
-`window.c:495-512` comprueba datos pendientes y `PANE_EXITED` antes de permitir
-la destrucción. `window.c:1660-1669` recibe EOF/error del fd y llama al cierre común.
-La contrapresión de clientes control puede deshabilitar la lectura del pane
-(`server-client.c:1978-1981`): esperar al consumidor conserva el comportamiento común,
-no equivale a esperar red dentro del callback SSH.
-
-Fuentes externas primarias: el mismo archivo libssh 0.9.0 registrado arriba y
-[RFC 4254, §5.3 y §6.10](https://www.rfc-editor.org/rfc/rfc4254.html).
-La [documentación de canales actual](https://api.libssh.org/stable/group__libssh__channel.html)
-es complemento; la comprobación de compatibilidad se hace contra 0.9.0, no contra
-su versión actual. Las siguientes rutas son **de libssh 0.9.0**:
-
-| Fuente leída | Hallazgo utilizado |
+| Comprobación | Resultado |
 |---|---|
-| `src/channels.c`, `ssh_channel_read_nonblocking` / `ssh_channel_is_eof` | 0 puede significar ausencia de datos; EOF se comprueba aparte y no se considera drenado mientras haya buffers de stdout/stderr |
-| `src/channels.c`, `channel_write_common` / `ssh_channel_window_size` | La escritura puede aceptar parte o 0 bytes; una ventana grande no prueba que el socket esté escribible. Se limitan bloques propios y se espera avance de red antes de seguir alimentando la biblioteca |
-| `src/channels.c`, `channel_rcv_close` / `channel_rcv_request` | CLOSE puede conservar datos en buffers; el callback de exit status es una señal independiente. No se libera al primer callback de fin |
-| `src/channels.c`, `ssh_channel_request_pty_size`, `ssh_channel_request_shell` | Las solicitudes conservan estado pendiente en modo no bloqueante; se repite la misma operación tras AGAIN sin recrear el canal |
-| `src/poll.c`, `ssh_event_add_session`, `ssh_event_dopoll`, `ssh_event_remove_session`, `ssh_event_free` | El poller se crea/registra con el contexto de conexión válido, se llama con timeout 0 y se separa de la sesión antes de liberar esta; no se usa una espera infinita |
-| `src/client.c`, `ssh_disconnect`; `src/session.c`, `ssh_free` | La desconexión administra socket/canales y los invalida. La spec evita close del fd TCP por fuera de libssh y un segundo free del canal tras desconectar |
-| `include/libssh/callbacks.h`, callbacks EOF/CLOSE/exit status/exit signal y `ssh_remove_channel_callbacks` | El contexto mantiene la estructura de callbacks viva; se retiran antes de liberarlo. Señales remotas sin exit status normal se representan como error 255 |
+| Base tmux | Checkout separado en el hash del encabezado; `git status --short` vacío y `git diff --exit-code` con salida 0 |
+| Rutas y funciones (M2) | Todos los archivos tmux citados existen; las funciones internas se localizaron en su definición. Las fuentes nuevas (`cmd-ssh-pane.c`, `ssh-pane.c`), el patrón `regress/ssh-pane-*.sh`, `compat/ssh-pane.c` (descartado) y las rutas de libssh/OpenBSD se identifican como tales y no se cuentan como existentes |
+| Líneas (M3) | 284 apariciones de `archivo:línea` en notas, spec y capsule, 169 anclas distintas: todas exactas. En rangos se leyó el bloque completo |
+| Conteos de la base | 153 `.c` en la raíz y 101.303 líneas; 46 archivos en `compat/`; 12 `osdep-*.c`; 172 `regress/*.sh`, 155 con `readlink`; definición de `spawn_pane` más cinco sitios de llamada |
+| Literales de tmux usados en VCs | `command %s: %s`, `unknown flag`, `too few/many arguments`, `-%c expects an argument`, `unknown command: %s`, `invalid tiled geometry %s`, `no space for a new pane`, `can't split a floating pane`, `can't find pane: %s`, `create pane failed: %s`, `respawn pane failed: %s` y `respawn window failed: %s` existen en el código |
+| IDs de la spec | 30 FR, 2 BR, 4 NFR y 8 INV; 44 VCs únicos; cada requisito e invariante tiene VC y fila en la tabla de cobertura; sin referencias a IDs inexistentes. Todo FR tiene Dado/Cuando/Entonces con un solo Cuando |
 
-La spec añade pruebas de datos finales/cierres repetidos a VC-10a, cancelación a
-VC-28, pérdida activa a VC-29 y colas a VC-27. Los datos recibidos en un cierre normal
-se drenan antes del EOF local; kill es cancelación explícita y puede descartarlos.
-Cierre sin metadatos completos tiene plazo de 2 s una vez drenada la salida; un
-consumidor local bloqueado difiere ese drenaje, con datos acotados en las colas propias
-y cancelación disponible. Una partición silenciosa de una sesión activa no tiene
-plazo de detección: no se agregan keepalives ni reconexión a esta v1.
-
-**Verificación realizada:** lectura de fuentes/protocolo y revisión de consistencia
-documental. **Sin ejecutar** sesiones SSH, fixtures de red/contrapresión, ASan,
-medición de RSS ni tests de estados. Los máximos/deadlines son requisitos propuestos,
-no mediciones. El siguiente paso sigue siendo cerrar los FRs/argumentos y sus fixtures;
-la revisión completa de VCs de rendimiento y del plan de iteraciones se hace después.
-
-
-## Argumentos, errores y entorno del paso 5 — 2026-09-30
-
-Se concretan uso, defaults, valores inválidos, resultado `-P`, selección `-d`,
-identidad relativa y distinción entre rechazo síncrono del comando y error asíncrono
-con pane publicado. Son contratos propuestos del comando nuevo, no cambios a los
-comandos existentes. FR-15 a FR-19 y VC-30 a VC-34 (31a a 31d separados) completan los
-casos de argumentos, layout, identidad, confianza ausente/ilegible y rechazo de PTY.
-
-| Evidencia tmux leída en el commit base | Consecuencia |
-|---|---|
-| `arguments.c:208-282`, `cmd.c:527-537` | Se conserva parser común, `--`, mensajes de flags y aridad; no se inventa otra CLI |
-| `arguments.c:687-699` | Último valor gana en una opción repetida; el contrato lo explicita |
-| `layout.c:1640-1700` | **Conflicto real de nombres:** `-p` es porcentaje para el helper. El comando SSH filtra el objeto de geometría y no pasa su puerto al helper |
-| `arguments.c:998-1037`, `arguments.c:1067-1108` | Se conserva gramática/expansión de tamaño del layout, con rangos de la base; tamaño solicitado no promete tamaño realizable |
-| `spawn.c:292-306`, `server-client.c:2926-2941` | La identidad relativa se ancla al cwd efectivo del pane, copiado antes de la apertura asíncrona |
-| `cmd-split-window.c:33`, `cmd-split-window.c:69`, `cmd-split-window.c:285-310` | Target común, selección de pane y template fijo para `-P`; son precedentes, no una modificación de split-window |
-
-Evidencia externa de la misma copia libssh 0.9.0: `src/options.c` acepta `user@host`
-y enmascara PORT a 16 bits; el comando propuesto valida antes de pasar esos valores.
-`src/misc.c`, `ssh_get_user_home_dir`, consulta `getpwuid_r` antes de HOME; no basta
-cambiar una variable de entorno para aislar known_hosts. `src/knownhosts.c`,
-`ssh_session_get_known_hosts_entry`, puede aceptar una coincidencia en el archivo
-global. Para respetar la fuente de confianza de usuario elegida se desactiva ese
-archivo con `/dev/null`, se fija verificación estricta y solo se acepta
-`SSH_KNOWN_HOSTS_OK` de `ssh_session_is_known_server`. No se emplea una API que solo
-compruebe si hay entradas, ni una rutina de escritura/actualización de confianza.
-
-Fixture propuesto: Linux desechable con cuenta real y home de esa cuenta, claves
-locales del fixture, server tmux con socket absoluto exclusivo y sshd aislado. El
-[manual oficial de sshd](https://man.openbsd.org/sshd) documenta primer plano,
-configuración propia y validación; `-d` atiende una conexión y se excluye para corridas
-repetidas. Las opciones se contrastan con
-[sshd_config](https://man.openbsd.org/sshd_config); la versión Linux instalada debe
-validarlas con `-t`/`-T`, sin suponer que una variante cualquiera funcione. Los logs
-se correlacionan con la conexión y no con todos los servicios del host. Se sustituye
-10.255.255.1 por listener loopback sin banner para timeout: una IP arbitraria podría
-responder, ser inalcanzable o rechazarse inmediatamente. Se usan marcas calculadas,
-archivo nuevo por corrida, salida ordenada completa y dimensiones reales para evitar
-PASS por eco, restos de otra corrida, conteo de pantalla o limitaciones del layout.
-
-El archivo de criterios de ejemplo antes revisado ya no se encontró en la ruta
-Downloads indicada al continuar este paso. Se conserva la evaluación registrada en
-los pasos anteriores y se releen las correcciones TP1 adjuntas; se usan como criterios
-de claridad/observables, sin modificar TP1 ni tratar sus textos como instrucciones
-para ejecutar acciones externas. La consigna TP2 sigue exigiendo análisis y spec,
-solo Linux y ninguna implementación C.
-
-**Verificación de este paso:** lectura de código/headers y consistencia documental;
-no se arrancaron sshd/tmux, ni se generaron claves, ni se alteraron cuentas o archivos
-SSH. Los VCs definen pruebas futuras, no resultados medidos. Quedan la revisión
-integral de rendimiento/VCs del paso 6, el plan de iteraciones del paso 7 y la auditoría
-final del paso 8; no se declara cerrada la entrega completa.
-
-Comprobaciones documentales finales del paso 5: 33 FR/BR/NFR más 8 invariantes,
-con 41 VCs únicos y sin referencias VC sin definición. Cada FR conserva
-Dado/Cuando/Entonces y su VC. Enlaces relativos válidos; capsule de 98 líneas.
-Se comprobaron los límites de 245 citas de fuentes tmux y se leyeron los bloques
-nuevos; los conteos históricos del paso 1 no se presentan como conteos actuales.
-La copia de tmux sigue limpia en el hash base y `git diff --check` no informa errores.
-Solo se editaron los tres Markdown de TP2; TP1 y el PDF aportado siguen sin cambios.
-
-
-## Mediciones y VCs del paso 6 — 2026-09-30
-
-Se conservan los presupuestos del borrador (100 ms, apertura 10 s, 20 MiB/s,
-32 MiB y colas 1 MiB/512 KiB), y se fijan carga, frontera de tiempo, herramienta,
-unidades, configuración y evidencia. Son criterios propuestos de la spec, no
-números exigidos por la consigna ni resultados inferidos de nombres de APIs.
-Las correcciones TP1 pedían condición de carga y misma métrica en NFR/VC: se aplica
-ese criterio a TP2 sin cambiar los artefactos de TP1 ni repetir la búsqueda GCS.
-
-| Evidencia leída en tmux base | Consecuencia para los VCs |
-|---|---|
-| `tmux.c:331-342` | Precedente de tiempo en milisegundos, con preferencia por CLOCK_MONOTONIC; el fixture exige reloj monotónico y registra intervalos reales |
-| `options-table.c:845-851` | history-limit default 2000; esa carga se fija para rendimiento, separada de la historia 5000 de pruebas funcionales |
-| `window.c:1640-1647`, `cmd-pipe-pane.c:128-167` | Se puede comprobar flujo completo con pipe-pane; el pipe tiene su hijo de instrumentación y no se mezcla con la corrida sin exec de FR-3 |
-| `server-client.c:1909-1981`, `control.c:325-345` | La lectura del pane se pausa cuando todos los clientes control relevantes no aceptan salida; un cliente sano puede impedir esa presión |
-| `regress/respawn-pane-control-lag.sh` | Su segundo cliente sano mantiene lecturas. No se copia ese detalle a un ensayo cuyo objetivo es provocar pausa RX |
-| `cmd-paste-buffer.c:87-123` | Paste cambia LF a CR por defecto; `-r -S`, sin bracketed paste, conserva el payload para prueba raw de entrada |
-
-VC-18 pasa de una marca final a cantidad exacta/hash y confirmación de renderizado,
-con t0 antes de enviar y t1 tras colector/render. Se definen 200 MiB, tres corridas,
-build normal y escenario loopback con historia acotada; monitor externo cuenta solo
-RSS del server, incluidos sus buffers pipe. La documentación
-[oficial de /proc](https://docs.kernel.org/filesystems/proc.html) describe VmRSS/VmHWM,
-reinicio del pico mediante clear_refs=5 y límites de precisión del accounting. El
-reset afecta únicamente al PID de prueba previamente identificado, en un ensayo
-futuro; **no se escribió en /proc durante esta revisión**. Un pico histórico ni RSS
-de otro proceso sirven como prueba de memoria del tramo medido.
-
-NFR-1/VC-16 fija 20 muestras completas y marca que no pasa por eco; con contrapresión
-VC-27 exige respuesta de comandos independientes durante la pausa y salida local
-tras reanudar. No se promete salida visible de un control client que dejó de leer,
-ni se modifica esa política común para hacer pasar la prueba. Pausa se sostiene
-1 s desde la evidencia de cola llena, en vez de suponer que dormir 1 s la llenó.
-Máximos se derivan de longitudes reales, con comprobación de la instrumentación,
-y se verifica hash/longitud en ambas direcciones, sin confundir colas propias con RSS.
-
-BR-2/VC-15 acota la garantía a la identidad importada y logs generados por la función;
-no agrega redacción universal al logging común del pane. Búsqueda de cuerpo de clave,
-encodings y frase canario en archivos/argv se complementa con revisión de call sites
-nuevos. `SSH_OPTIONS_LOG_VERBOSITY` y `SSH_LOG_NOLOG` se comprobaron en el header
-libssh 0.9.0; no se imprimen patrones secretos ni mensajes libres de la biblioteca.
-ASan/LSan se precisan para VC-28 usando la
-[documentación oficial de Clang](https://clang.llvm.org/docs/AddressSanitizer.html);
-se declaran los límites de una dependencia sin instrumentar y se separa ese build
-del ensayo de rendimiento. No se ejecutó ni se instaló esa instrumentación.
-
-Para que los plazos y fallas tardías sean verificables se propone un fixture SSH
-controlable, solo herramienta de test: Python/Paramiko en loopback, sin dependencia
-nueva de producción ni jobs CI. La [API de servidor](https://docs.paramiko.org/en/stable/api/server.html)
-permite decisiones de auth/canal/PTY/shell; la [API de canal](https://docs.paramiko.org/en/stable/api/channel.html)
-separa status, EOF de escritura y CLOSE. Gates detienen/reanudan solo el proceso
-remoto del fixture, sin sleeps en callbacks normales ni bloqueo del cliente tmux.
-Se fija su contrato y se explicita que **no existe todavía un helper verificado**.
-VC-17 prueba que pasar de etapa a +8 s no reinicia el deadline de +10 s; VC-34 cubre
-rechazos de las tres solicitudes. FR-20/VC-35 y FR-21/VC-36 vuelven verificables el
-cierre incompleto de 2 s y la normalización/primer status ya elegidos en el paso 4.
-
-**Verificación realizada:** lectura de fuentes y documentación primaria, revisión
-de métodos de medición y consistencia de la spec. Sin build C, clientes/servidores
-SSH, generación de claves, lectura de secretos, ASan, cronometraje de panes ni
-mediciones de /proc. Este paso no afirma resultados de rendimiento/cierre.
-Quedan el plan de iteraciones del paso 7 y la auditoría final del paso 8; no se
-implementan esas fases ni se declara completa la entrega en esta revisión.
-
-Comprobaciones documentales finales del paso 6: 35 FR/BR/NFR + 8 invariantes y
-43 VCs únicos; referencias a IDs definidas y VC para cada requisito/invariante.
-FRs conservan Dado/Cuando/Entonces; enlaces locales válidos; capsule de 100 líneas.
-Se comprobaron límites de 259 citas de tmux y se leyeron los bloques nuevos; esto
-no reemplaza verificación semántica ni ejecución. Aritmética de payload/MiB/KiB y
-opciones de logging libssh coherentes; base tmux limpia en el hash fijado.
-`git diff --check` sin errores; solo los tres Markdown de TP2 modificados.
-
-
-## Orden de iteraciones y cobertura del paso 7 — 2026-09-30
-
-Se revisa únicamente el plan de la spec, con las decisiones/contratos de los pasos
-anteriores. Las iteraciones I1–I4 son para una implementación futura; los pasos de
-esta revisión documental no las ejecutan. TP2 prohíbe entregar C. TP1 mantiene su
-pipeline de gcsgrep en el mismo proyecto; su búsqueda GCS ya se hizo y no se repite.
-No obliga a implementar el cliente SSH ni autoriza modificar TP1 en este paso.
-
-El plan anterior dejaba resize/respawn y todos los tests demasiado tarde. La base
-releída confirma `window.c:612-622` (ioctl y fatal), `spawn.c:312-349` (respawn destruye
-fd/bufferevent/estado) y `server-fn.c:354-420` (cierre con conservación del pane).
-Resize sin ioctl, rechazo temprano de respawn, exclusión utempter, identidad SSH,
-status y cleanup deben estar antes del primer pane publicado en I2. El transporte
-inicial ya necesita I/O bidireccional/parcial y cotas; I3 completa datos finales/
-estados y su evidencia, no comienza recién a escribir un destructor o una entrada.
-
-Se conserva baseline y guardas primero, con registro de límites del scaffold. Su
-respuesta not implemented es solo un estado de una rama futura, nunca cierre de
-FR-2 ni error agregado al contrato final. FR-1 se cierra con alias/apertura en I2;
-FR-9 puede verificarse en I1. El control positivo de dependencia libssh necesita el
-bridge real; la línea de enlace del scaffold sola no se da por resultado de VC-26.
-Los ocho invariantes se controlan durante cada etapa y se cierran sobre el candidato
-completo en I4, también con on/no-Linux/utempter según la matriz de la spec.
-
-La prueba acompaña cada iteración: registro/build en I1, argumentos/apertura/auth/
-kill/resize/respawn en I2, integridad/cierre en I3 y medidas/documentación/aceptación
-integrada en I4. No se difieren todos los scripts a I4. Helpers propuestos son de
-fixture temporal, operados por scripts nuevos; no se añaden fuentes Python al build
-ni se presentan herramientas todavía no construidas como archivos reales de tmux.
-El runner/fixtures heredados y CI se conservan, comparando cero fallos nuevos.
-
-La tabla extrae el VC principal de cada FR/BR/NFR de la spec y agrega la asociación
-explícita de los invariantes. 43 filas, 43 requisitos/invariantes y 43 VCs distintos:
-I1 = 1, I2 = 24, I3 = 7, I4 = 11. Tiene todos los sub-IDs FR-16a…d / VC-31a…d.
-Dependencias internas a otros VCs también se requieren; NFR-1 se cierra en I4 por
-su contrapresión, aunque su control temprano VC-16 se corre desde I2. Resultados
-futuros registran hash/configuración/evidencia y PASS/FAIL/NO VERIFICADO; ninguna
-fila se marca PASS por estar listada. Un cambio posterior exige revalidación del
-candidato y no permite aceptar una comparación obtenida en otro hash.
-
-**Verificación de este paso:** lectura de consigna TP1/TP2, forma del ejemplo guiado,
-fuentes del riesgo y reconciliación de plan/IDs. El ejemplo se toma como formato;
-sus comandos no se ejecutan ni reemplazan la tarea tmux. No se escribió C, no se
-compiló ni se ejecutaron fixtures/regresiones. Queda el paso 8, auditoría documental
-final; no se declara completa la entrega ni implementado el plan futuro.
-
-Comprobaciones documentales finales del paso 7: las 43 filas cubren exactamente los
-35 FR/BR/NFR y 8 invariantes, sin duplicados ni VCs sin definir; cada asociación
-coincide con su VC principal. Distribución I1/I2/I3/I4: 1/24/7/11. FRs conservan
-Dado/Cuando/Entonces; enlaces relativos válidos y capsule de 100 líneas. Se
-comprobaron límites de 265 citas de tmux; la base sigue limpia en el hash fijado.
-`git diff --check` sin errores; solo los tres Markdown de TP2 modificados. Estos
-controles de texto no sustituyen ejecución ni certifican las métricas futuras.
-
-
-## Auditoría documental final del paso 8 — 2026-09-30
-
-**Resultado:** revisión de los tres artefactos TP2 cerrada sobre las fuentes
-disponibles, con los ajustes de abajo. El alcance sigue siendo análisis/spec para
-SSH nativo en tmux, solo Linux; no se entrega implementación ni se declaran VCs de
-ejecución aprobados. Este resultado no es una calificación del profesor.
-
-### Fuentes y tratamiento de instrucciones
-
-La consigna TP2 del repo coincide byte a byte con `Downloads/enunciado.md` (`cmp`,
-exit 0). Se releen también la consigna TP1, las correcciones pegadas y el ejemplo
-guiado. La solicitud del usuario delimita el trabajo: corregir estos documentos,
-conservar las decisiones aceptadas, no modificar TP1 ni repetir su búsqueda GCS.
-La obligación de implementar gcsgrep en TP1 no se traslada a SSH en TP2.
-
-| Material | Uso en esta revisión |
-|---|---|
-| Consigna TP2 | Define el entregable y sus límites: análisis/spec, comando nuevo, sin binario ssh, Linux y preservación de builds/comandos/PTY |
-| Consigna TP1 y correcciones pegadas | Contexto del mismo proyecto y criterios de claridad: observables, contratos completos, carga/métrica y decisiones fundamentadas. Sus MUST/SHOULD/COULD sobre gcsgrep no ordenan editar TP1 en esta fase |
-| Ejemplo guiado de fzf | Forma de los tres artefactos. El prompt citado, clone/comandos y «No uses tmux» pertenecen a ese ejemplo/ejercicio adicional; no sustituyen la tarea tmux ni se ejecutan |
-| Código tmux del hash fijado | Evidencia de rutas, funciones y comportamiento existente, no instrucciones para hacer merges/pushes de `SYNCING.md` |
-| Libssh 0.9.0 y documentación primaria ya registrada | Evidencia externa de API/políticas/medición, distinguida de fuentes tmux y de resultados de ejecución |
-
-No se encontraron, en los textos releídos, pedidos para ignorar instrucciones del
-usuario, revelar secretos, ejecutar acciones ajenas o falsificar evidencia. Las
-órdenes aparentes se evaluaron por origen/contexto; no se obedecen por estar en un
-adjunto ni por usar MUST. Una indicación ambigua o contradictoria no amplía el alcance.
-Esta revisión contextual no afirma haber inspeccionado material que falta.
-
-**Límite de criterios:** `Downloads/CRITERIOS DE CORRECCION.md` sigue ausente y no
-se encontró otra copia por nombre en Downloads/attachments. Se aplican los criterios
-de ejemplo registrados en pasos anteriores y las correcciones pegadas, disponibles.
-No se acredita una nueva comparación íntegra ni detección de instrucciones sospechosas
-en ese archivo ausente; tampoco se lo presenta como criterio final del profesor.
-
-### Correspondencia con la consigna y correcciones previas
-
-| Punto | Evidencia en los artefactos revisados |
-|---|---|
-| Spawn y proceso existentes | Notas trazan tabla → exec del comando → spawn → fdforkpty → hijo/complete/evento; cinco sitios de llamada y definición confirmados en la base |
-| Portabilidad y cambio acotado | Notas describen configure/compat/osdep/guardas y sincronización OpenBSD. Spec identifica fuentes nuevas y cambios compartidos, excluyendo compat/osdep/CI/parser/protocolo/comandos existentes |
-| Seis decisiones requeridas | Tabla de diseño de las notas con elegido/descartado/fundamento; tabla final de la spec consistente. Claves `-i` mantiene la elección explícita del usuario |
-| Límite Linux y preservación | Opción default off, rechazo temprano por host_os y guardas; INV-1 a INV-8 con VC-19 a VC-26, matriz y comparación con la base. No se confunde definir esos controles con haberlos pasado |
-| Contrato observable | CLI/defaults/validación y errores síncronos/asíncronos fijados; FRs Dado/Cuando/Entonces con VC, variantes de fallas y recorrido con shell real previsto |
-| Reglas y fundamento | BR-1/BR-2 declaran fundamento/excepciones/límites; confianza solo lectura y clave importada sin exposición, manteniendo funciones comunes |
-| NFRs medibles | Latencia 100 ms, apertura 10 s, 200 MiB en 10 s/RSS +32 MiB y colas 1 MiB/512 KiB con carga/herramienta/métrica coincidentes. Son presupuestos propios de la spec, no números impuestos por la consigna |
-| Cobertura y handoff | 35 FR/BR/NFR + 8 invariantes, 43 VCs y filas de cobertura; iteraciones futuras separadas de los pasos documentales; capsule de 100 líneas |
-
-### Ajustes cerrados en esta revisión
-
-- **A8-1 · Reglas incompletas/alcance excesivo:** BR-1 no explicitaba fundamento ni
-  excepciones y atribuía a todo tmux una prohibición de escribir bajo `.ssh`. Se
-  precisa el acceso de la función SSH, sin cambiar `save-buffer`/logging común.
-  BR-2 explicita excepciones y conserva su límite frente a datos arbitrarios del pane.
-- **A8-2 · Ausencia confundida con éxito:** VC-10b podía obtener conteo 0 de un pipe
-  aunque `list-panes` fallara. Ahora requiere consulta exit 0, ID SSH ausente,
-  pane local presente y server vivo. VC-9 separa status/stdout/stderr; el protocolo
-  general exige éxito de consultas antes de interpretar ausencia como observable.
-- **A8-3 · Resumen susceptible de lectura incorrecta:** la tabla final de decisiones
-  explicita que systemd/cgroups no aporta el rechazo por SO y que SSH lo agrega.
-  Rechazar hosts desconocidos es política de confianza previa sin prompts/TOFU;
-  se elimina la justificación imprecisa sobre disponibilidad de TTY. El rollback
-  antes de publicar se precisa para fallas recuperables, conservando los fatales
-  de memoria de las rutinas comunes ya declarados en el contrato de argumentos.
-- **A8-4 · Estado pendiente ya histórico:** el final del plan deja de anunciar esta
-  auditoría como siguiente paso y remite a este registro. Los registros 1–7 conservan
-  sus conteos/límites de ese momento; no se presentan como estado actual.
-
-La evidencia de estos cierres es documental: texto corregido y consistencia con los
-contratos existentes. Las pruebas de comportamiento siguen para el implementador;
-no se cierra un VC de ejecución por corregir su descripción.
-
-### Evidencia de cierre y límites
-
-| Comprobación efectivamente realizada | Resultado |
-|---|---|
-| IDs/BDD/reglas/cobertura | 29 FR + 2 BR + 4 NFR, 8 invariantes, 43 VCs únicos y 43 filas exactas. Sin IDs sin definición en los tres documentos; cada fila coincide con su VC principal; distribución 1/24/7/11 |
-| Rutas | 54 archivos concretos tmux y 10 patrones con coincidencias. 14 rutas externas libssh distinguidas; dos fuentes nuevas/un patrón de tests/ruta descartada no se cuentan como existentes. `config.h` es generado y `event.h` es header de dependencia, no archivos fuente de la base |
-| Rangos y nombres | 271 apariciones de citas numéricas, 163 anclas distintas, con archivo/rango válido, incluyendo YAML. 42 nombres internos presentes en fuente/header tmux y 27 nombres SSH en libssh; presencia léxica no prueba semántica/integración |
-| Conteos de la base | 153 C de raíz, 101.303 líneas; 46 archivos compat; 172 scripts regress y 155 con readlink literal. Definición más cinco sitios de llamada a spawn_pane, como indican las notas |
-| Fuente externa | SHA-256 del archivo libssh coincide con el fijado. Identificadores/fuentes propuestos no existen en la base tmux, como declara la spec |
-| Enlaces y capsule | Enlaces relativos de los tres documentos resuelven; capsule de 100 líneas |
-| Alcance Git | `git diff --name-status af207f842e678b5fc1f6e69c5bf6bc72d9d9dd4d` enumera solo los tres Markdown de TP2 para toda esta revisión. Checkout tmux limpio en su hash base; el PDF no versionado permanece fuera del cambio |
-
-El control de nombres se repitió tras distinguir `ssh_config`/`ssh_known_hosts`,
-que son nombres de archivos, de los símbolos SSH. Una coincidencia por nombre o
-un rango dentro del archivo no sustituye lectura: se contrastaron además los
-bloques críticos de spawn/resize/cierre/respawn/guardas y las políticas externas.
-No se afirma que las 271 citas sean 271 funciones ni 271 tests pasados; los conteos
-anteriores pertenecen a sus respectivas revisiones históricas.
-
-Se ejecutaron comprobaciones de texto/fuente, `cmp` de la consigna y controles Git;
-`git diff --check` termina con exit 0. No se compiló C, arrancó tmux/sshd, generó una
-clave, midió RSS/latencia ni ejecutó una regresión/VC SSH. No se modificó TP1, una
-cuenta/archivo SSH personal, CI ni el código tmux. Los fixtures y mediciones de la
-spec siguen propuestos; falta evidencia de ejecución si se implementa en el futuro.
-
-**Handoff:** los pasos documentales 1–8 quedan revisados; no quedan contradicciones
-documentales materiales detectadas en las fuentes disponibles tras estos ajustes.
-Permanece el límite de no poder releer el archivo original de criterios de ejemplo.
-Este cierre no certifica ese documento ausente, una evaluación futura del profesor
-ni funcionamiento del cliente SSH. La siguiente acción sobre estos cambios es su
-revisión/commit cuando el usuario lo solicite; no se inicia la implementación de C.
+**No se hizo:** compilar tmux o libssh, correr `regress/`, arrancar tmux/sshd, generar
+claves, medir latencia/RSS ni ejecutar ningún VC. Los VCs y presupuestos (100 ms, 10 s,
+20 MiB/s, 32 MiB, colas de 1 MiB) son requisitos propuestos, no mediciones.

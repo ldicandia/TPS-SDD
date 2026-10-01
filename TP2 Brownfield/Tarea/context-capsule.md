@@ -27,14 +27,14 @@ el pegado es otro camino (`window_pane_paste`, `window.c:2052`).
    si falla, llama `fatal` (`window.c:622`, `log.c:140-152`) y termina el server.
 2. **`PANE_STATUSREADY`**: sin él, `server_destroy_pane` retorna en `server-fn.c:382`. Un pane
    sin proceso hijo necesita un estado codificado como `waitpid` (`format.c:2293-2294`).
-3. **`PLATFORM` se calcula tarde** (`configure.ac:1008-1118`), después de las
-   opciones `--enable-*`. La guarda de Linux tiene que mirar `$host_os`, como
-   `--enable-static` (`configure.ac:84-97`).
+3. **`PLATFORM` se calcula tarde** (`configure.ac:1008-1118`), después de `--enable-*`:
+   la guarda Linux mira `$host_os`, como `--enable-static` (`configure.ac:84-97`).
 4. **utempter** recibe el fd en `spawn.c:581`, `window.c:1581` y `server-fn.c:367`.
    **`remain-on-exit`** conserva el pane (`server-fn.c:420`): liberar el bridge solo en
    `window_pane_destroy` no cubre el fin de sesión: `server-fn.c` entra en el alcance,
    con liberación idempotente y exclusión SSH de las tres llamadas utempter. La identidad
-   SSH se conserva en el pane muerto para rechazar respawn antes de `spawn.c:312-349`.
+   SSH persiste en el pane muerto: respawn se rechaza antes de `spawn.c:312-349` y
+   `respawn-window` antes de `spawn.c:143-154`, que destruye los otros panes primero.
 
 ## Contrato del bridge
 
@@ -89,8 +89,8 @@ siguen síncronos. Se desactiva `SSH_OPTIONS_PROCESS_CONFIG` para evitar configu
 SSH automática y se obtiene exit status por callback. Fuentes externas en las notas.
 Se usa `event_set`, como tmux, porque el build admite libevent antiguo
 (`configure.ac:281-300`, `compat.h:30-40`). No se probó el bridge ni su rendimiento.
-Medidas: payload/hash, reloj monotónico y VmHWM reiniciado; preservar control mode.
-Plan futuro I1→I4: guardas → apertura segura → fin íntegro → aceptación, 43 VCs.
+Medidas: payload/hash, reloj monotónico y VmHWM reiniciado. Plan futuro I1→I4:
+guardas → apertura segura → fin íntegro → aceptación, 44 VCs.
 
 ## Sin explorar
 

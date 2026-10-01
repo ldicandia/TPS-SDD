@@ -43,7 +43,7 @@ en `Makefile.am`. Las reglas de `configure.ac` son Autoconf, no código bajo un
 | `ssh-pane.c` (**nuevo**) | El *bridge*: sesión `libssh` no bloqueante, `socketpair`, integración con `libevent` |
 | `cmd.c` | `extern` y fila en `cmd_table`, ambas entre `#ifdef` |
 | `tmux.h` | `SPAWN_SSH 0x2000`, campos `ssh` en `struct spawn_context` y en `struct window_pane`, prototipos |
-| `spawn.c` | Rama SSH junto a `SPAWN_EMPTY` (`spawn.c:459`), sin `fdforkpty`; rechazo de respawn antes de `spawn.c:312-349`; exclusión SSH del alta utempter (`spawn.c:581`) |
+| `spawn.c` | Rama SSH junto a `SPAWN_EMPTY` (`spawn.c:459`), sin `fdforkpty`; rechazo de respawn antes de `spawn.c:312-349` y, en `spawn_window`, antes de `spawn.c:143`; exclusión SSH del alta utempter (`spawn.c:581`) |
 | `window.c` | Resize SSH sin ioctl de PTY (`window.c:597`); liberación idempotente en `window_pane_destroy` (`window.c:1567`) y exclusión SSH de utempter (`window.c:1581`) |
 | `server-fn.c` | Liberación del transporte en `server_destroy_pane` (`server-fn.c:354`), incluso con `remain-on-exit`; exclusión SSH de utempter (`server-fn.c:367`) |
 | `tmux.1` | Documentar `ssh-pane` con el formato mdoc usado por los comandos existentes |
@@ -66,6 +66,9 @@ El `TERM` se toma del entorno construido por `environ_for_session(s, 0)`
 spawn: DNS/archivos no se procesan con las señales bloqueadas ni dentro de ese hook.
 No se marca `PANE_EMPTY`; una identidad SSH independiente del transporte sobrevive
 al cierre, para excluir utempter y rechazar respawn incluso en un pane muerto.
+`#{pane_current_command}` y `#{pane_current_path}` conservan el fallback común cuando
+`tcgetpgrp` falla sobre el socket (shell local configurada y vacío, ver notas §6);
+no se modifican `format.c` ni `osdep-*.c` para mostrar datos remotos.
 
 | Estado | Operación / salida |
 |---|---|
@@ -161,7 +164,12 @@ de pedir PTY se usa ese tamaño; si cambia mientras una solicitud está pendient
 completa y luego se aplica el último tamaño. En Activo se envía
 `ssh_channel_change_pty_size`, sin `TIOCSWINSZ` sobre el socket (`window.c:612-622`);
 al cerrar se descarta lo pendiente. Respawn se rechaza antes de la mutación de
-`spawn.c:312-349`, con el literal de FR-12.
+`spawn.c:312-349`, con el literal de FR-12. `respawn-window` llega por otro camino:
+`spawn_window` destruye los demás panes y reinicia el layout (`spawn.c:143-154`)
+**antes** de llamar a `spawn_pane` con el primer pane. Por eso el rechazo de FR-22
+se hace en `spawn_window`, después de la comprobación "still active" y antes de
+`spawn.c:143`, si ese primer pane es SSH. Los panes SSH que no son el primero se
+eliminan con la misma baja de `kill-pane` (`window_pane_destroy`).
 
 #### Fin, drenaje y propiedad de recursos
 
@@ -611,9 +619,10 @@ Comparar también la invocación por alias en VC-2.
 ### FR-2 · Abre un pane con una sesión remota
 
 **Dado** el entorno de prueba común, con la clave sin frase de la cuenta `TP2_USER` en `/ruta/K`,
-**cuando** se ejecuta `tmux ssh-pane -i /ruta/K -p 2222 -u "$TP2_USER" 127.0.0.1`,
-**entonces** el comando sale con código `0`, el pane activo se divide, el pane nuevo muestra
-el prompt de la shell remota y `#{pane_dead}` vale `0`.
+**cuando** se ejecuta `tmux ssh-pane -P -t <local> -i /ruta/K -p 2222 -u "$TP2_USER" 127.0.0.1`,
+**entonces** el comando sale con código `0`, `<local>` se divide en un pane nuevo, la
+shell remota de ese pane produce la marca `TP2-REMOTO-OK:` del entorno común y
+`#{pane_dead}` vale `0`.
 
 **VC-2:** guardar exit 0 de la apertura y un ID nuevo; dentro de 5 s obtener la
 marca remota del entorno común, `Accepted publickey` para esa conexión y
@@ -633,7 +642,7 @@ descendientes (no solo hijos directos): 0 con comm `ssh`. Una traza ausente, emp
 tarde o denegada por ptrace no pasa. El sshd remoto del fixture no es descendiente
 del server tmux y sus procesos no se mezclan con ese resultado.
 
-### FR-4b · Autenticación con clave en archivo
+### FR-4 · Autenticación con clave en archivo
 
 **Dado** el entorno de prueba común, con un `sshd` que acepta solo la clave `K`,
 `K` sin frase en `/ruta/K` y un `SSH_AUTH_SOCK` que apunta al socket señuelo del entorno común,
@@ -641,7 +650,7 @@ del server tmux y sus procesos no se mezclan con ese resultado.
 **entonces** la autenticación tiene éxito y el pane muestra la shell remota sin consultar
 el agent.
 
-**VC-4b:** se cumple VC-2; una traza de `connect` sobre el server tmux, iniciada antes
+**VC-4:** se cumple VC-2; una traza de `connect` sobre el server tmux, iniciada antes
 del comando, no registra una conexión al socket de ese agent.
 
 ### FR-5 · Sin credenciales válidas, falla dentro del pane
@@ -846,12 +855,14 @@ no tiene detección acotada en esta v1: no se agregan keepalives/reconexión.
 
 ### FR-15 · Argumentos inválidos se rechazan antes de crear el pane
 
-**Dado** un server on con un target local válido,
-**cuando** el comando tiene aridad, flags o valores inválidos según el contrato,
-**entonces** sale 1, informa el error por stderr y no crea pane ni transporte.
+**Dado** un server on con un target local válido y una fila de la tabla de VC-30,
+**cuando** se ejecuta la invocación de esa fila,
+**entonces** sale 1, stderr contiene exactamente el texto de esa fila y no se crea
+pane ni transporte.
 
-**VC-30:** ejecutar cada caso en el mismo estado inicial; guardar status/stdout/stderr,
-IDs y fds antes/después. Stdout vacío, exit 1 y 0 panes/fds nuevos en todos:
+**VC-30:** ejecutar cada fila por separado, en el mismo estado inicial; guardar
+status/stdout/stderr, IDs y fds antes/después. Stdout vacío, exit 1 y 0 panes/fds
+nuevos en todas:
 
 | Invocación después de `tmux` | Stderr esperado |
 |---|---|
@@ -873,10 +884,11 @@ No usar el puerto del sshd 2222 como supuesto default.
 
 ### FR-16a · Dirección, posición y tamaño usan el layout común
 
-**Dado** un target local tiled con espacio para dividir,
-**cuando** `ssh-pane` usa dirección, `-b` o `-l` válidos,
-**entonces** la geometría es la de un split local equivalente, sin interpretar el
-puerto como porcentaje de tamaño.
+**Dado** un target local tiled con espacio para dividir y un juego de opciones de
+geometría de la lista de VC-31a,
+**cuando** se abre un pane SSH con ese juego y `-p 2222`,
+**entonces** `pane_left`, `pane_top`, `pane_width` y `pane_height` coinciden con los de
+un `split-window` local con el mismo juego, sin interpretar el puerto como porcentaje.
 
 **VC-31a:** en sesiones separadas idénticas de 160×48, comparar dimensiones y posiciones
 `pane_left`, `pane_top`, `pane_width`, `pane_height` entre split local y SSH para:
@@ -899,37 +911,54 @@ común `can't find pane: <id>` y 0 panes nuevos. No redefinir el resolver.
 
 ### FR-16c · La selección obedece la opción detached
 
-**Dado** un target local y su pane activo registrado,
-**cuando** se abre un pane SSH con o sin `-d`,
-**entonces** con `-d` se conserva el activo anterior y sin `-d` se activa el nuevo.
+**Dado** un target local, su pane activo registrado y una fila de la tabla de VC-31c,
+**cuando** se abre un pane SSH con las opciones de esa fila,
+**entonces** `#{pane_active}` vale 1 en el pane que indica la fila.
 
-**VC-31c:** dos corridas desde el mismo estado inicial, una por variante; exit 0,
-selección esperada y VC-2 exitoso en el nuevo pane. Identificarlo por `-P` aunque no
-esté activo. Esta opción no se confunde con una sesión SSH sin PTY.
+**VC-31c:** una corrida por fila, desde el mismo estado inicial; exit 0, selección
+esperada y VC-2 exitoso en el nuevo pane. Identificarlo por `-P` aunque no esté
+activo. Esta opción no se confunde con una sesión SSH sin PTY.
+
+| Opciones | Pane activo después |
+|---|---|
+| `-d -P` | El activo registrado antes |
+| `-P` | El pane SSH nuevo |
 
 ### FR-16d · Print devuelve la ubicación del nuevo pane
 
-**Dado** un comando de apertura válido,
-**cuando** se ejecuta con o sin `-P`,
-**entonces** solo con `-P` imprime la ubicación según el template fijo del contrato.
+**Dado** un comando de apertura válido y una fila de la tabla de VC-31d,
+**cuando** se ejecuta con las opciones de esa fila,
+**entonces** stdout es el indicado en la fila.
 
-**VC-31d:** cuatro combinaciones de `-d` y `-P`: exit 0; con `-P`, una sola línea
-coincide con el template y resuelve al ID nuevo; sin `-P`, stdout vacío. Cada pane
-pasa VC-2. Repetir apertura exitosa omitiendo `-u`: log de sshd confirma TP2_USER,
+**VC-31d:** una corrida por fila: exit 0 y cada pane pasa VC-2. Una línea de
+template debe resolver al ID nuevo.
+
+| Opciones | Stdout esperado |
+|---|---|
+| `-P` / `-d -P` | Una sola línea `#{session_name}:#{window_index}.#{pane_index}` del pane nuevo |
+| ninguna / `-d` | Vacío | Repetir apertura exitosa omitiendo `-u`: log de sshd confirma TP2_USER,
 la cuenta del server, y se obtiene la marca remota. FR-15 cubre que un error de
 argumentos no imprime ubicación de éxito.
 
 ### FR-17 · Una identidad inutilizable o rechazada no dispara fallback
 
-**Dado** host confiable y remain-on-exit on,
-**cuando** `-i` apunta a una ruta inexistente, archivo ilegible, contenido inválido,
-clave con frase o clave válida no autorizada,
+**Dado** host confiable, remain-on-exit on y una identidad de la tabla de VC-32,
+**cuando** se abre el pane con `-i` apuntando a esa identidad,
 **entonces** el pane termina con `ssh-pane: authentication failed` y status 255,
 sin prompt ni intentos con otras identidades o agent.
 
-**VC-32:** corrida separada por cada variante, exit del comando 0, línea exacta y
-`pane_dead=1`, `pane_dead_status=255` dentro de 5 s. Tmux es no root para que 0000
-sea realmente ilegible. Además repetir sin `-i` (VC-5), con identidad default válida
+**VC-32:** corrida separada por cada fila, exit del comando 0, línea exacta y
+`pane_dead=1`, `pane_dead_status=255` dentro de 5 s.
+
+| Identidad `-i` | Preparación en TP2_ROOT |
+|---|---|
+| Ruta inexistente | Ruta absoluta nueva, comprobada ausente |
+| Archivo ilegible | Copia de `K` con permisos 0000 |
+| Contenido inválido | Archivo de texto que no es una clave |
+| Clave con frase | Identidad con frase canario del entorno común |
+| Clave no autorizada | Par válido cuya pública no está en AuthorizedKeysFile |
+
+Tmux es no root para que 0000 sea realmente ilegible. Además repetir sin `-i` (VC-5), con identidad default válida
 instalada en el home y un socket agent señuelo: sigue fallando, sin conexión al socket
 ni apertura de esa identidad default. Stdin del server no proporciona una frase;
 el otro pane sigue atendido. La clave con frase no produce espera ni prompts.
@@ -938,12 +967,18 @@ en el nombre correctamente entrecomillado; obtiene el mismo resultado de VC-2.
 
 ### FR-18 · Falta o error de confianza no autentica ni escribe
 
-**Dado** un host del fixture y remain-on-exit on,
-**cuando** known_hosts está ausente o no es legible por el UID del server,
+**Dado** un host del fixture, remain-on-exit on y un estado de known_hosts de la
+tabla de VC-33,
+**cuando** se abre el pane con la clave `K`,
 **entonces** falla antes de autenticar con el mismo diagnóstico/status de FR-6a;
 no crea, repara ni actualiza known_hosts.
 
-**VC-33:** una corrida por variante, exit 0 de apertura; dentro de 5 s línea exacta,
+| Estado de `~/.ssh/known_hosts` | Preparación |
+|---|---|
+| Ausente | Archivo eliminado; `~/.ssh` 0700 presente |
+| Ilegible | Contenido correcto con permisos 0000, tmux no root |
+
+**VC-33:** una corrida por fila, exit 0 de apertura; dentro de 5 s línea exacta,
 `pane_dead=1`, status 255 y 0 solicitudes userauth de esa conexión. Ausente permanece
 ausente; ilegible conserva bytes/permisos. Repetir FR-6a/6b con una entrada correcta
 en `/etc/ssh/ssh_known_hosts` **solo dentro del entorno desechable**: sigue rechazando
@@ -951,14 +986,20 @@ el host, porque la v1 no usa esa fuente. VC-14 confirma ausencia de escrituras.
 
 ### FR-19 · Solicitudes de apertura rechazadas terminan el pane
 
-**Dado** host/clave válidos, remain-on-exit on y un servidor que rechaza una solicitud
-de canal, PTY o shell,
+**Dado** host/clave válidos, remain-on-exit on y un servidor de prueba configurado
+para rechazar la solicitud de una fila de la tabla de VC-34,
 **cuando** se intenta abrir el pane SSH,
-**entonces** termina con status 255 y el diagnóstico de la etapa; no se abre una shell
-sin PTY ni se cambia de solicitud como alternativa.
+**entonces** termina con status 255 y la línea literal de esa fila; no se abre una
+shell sin PTY ni se cambia de solicitud como alternativa.
 
-**VC-34:** corrida por etapa: rechazo de canal → `ssh-pane: connection failed: channel`,
-PTY → `ssh-pane: connection failed: pty`, shell → `ssh-pane: connection failed: shell`.
+**VC-34:** una corrida por fila:
+
+| Solicitud rechazada | Línea literal |
+|---|---|
+| Canal `session` | `ssh-pane: connection failed: channel` |
+| PTY | `ssh-pane: connection failed: pty` |
+| Shell | `ssh-pane: connection failed: shell` |
+
 Cada comando sale 0; aceptación publickey y rechazo preciso están registrados en
 el servidor del fixture; en ≤ 5 s línea exacta, pane_dead=1, status 255, server vivo
 y transporte liberado. OpenSSH con PermitTTY no cubre PTY (-T lo confirma); para
@@ -968,14 +1009,21 @@ una capacidad de gates/rechazos que no proporciona. Cleanup por corrida.
 
 ### FR-20 · Cierre remoto incompleto no deja un pane colgado
 
-**Dado** un pane activo, remain-on-exit on y consumidor local activo,
-**cuando** llega EOF sin status/CLOSE, o status sin EOF/CLOSE, y no llegan los
+**Dado** un pane activo, remain-on-exit on, consumidor local activo y un fixture que
+envía solo la señal de una fila de la tabla de VC-35,
+**cuando** transcurren 2 s desde drenar la salida recibida sin que lleguen los
 metadatos restantes,
-**entonces** tras drenar la salida recibida, el plazo de 2 s del contrato termina el
-pane con status 255 y `ssh-pane: connection failed: incomplete remote close`.
+**entonces** el pane queda muerto con status 255 y
+`ssh-pane: connection failed: incomplete remote close`.
 
-**VC-35:** fixture SSH controlable, dos corridas independientes: `shutdown_write`
-solo, o `send_exit_status(7)` solo; no llamar close ni cerrar el Transport por al
+**VC-35:** fixture SSH controlable, una corrida independiente por fila:
+
+| Señal enviada por el fixture | Señales que no llegan |
+|---|---|
+| EOF (`shutdown_write`) | exit status y CLOSE |
+| exit status (`send_exit_status(7)`) | EOF y CLOSE |
+
+En ambas, no llamar close ni cerrar el Transport por al
 menos 4 s. Mantener referencias al canal para evitar cierre por garbage collection.
 Guardar envío remoto, recepción y `grace_start_ms`/deadline de cierre propuestos del
 bridge; sin salida pendiente, en polling ≤ 100 ms el pane queda muerto/status 255
@@ -985,22 +1033,47 @@ sigue atendida. No atribuir una caída TCP del fixture a cierre incompleto.
 
 ### FR-21 · Estado remoto normal se conserva como estado de pane
 
-**Dado** un fin remoto completo con salida drenada y remain-on-exit on,
-**cuando** se recibe exit status remoto,
-**entonces** el pane conserva los 8 bits bajos del primer status como salida normal;
-un CLOSE sin status usa 255, como exige el contrato.
+**Dado** remain-on-exit on, salida drenada y un fixture que envía la secuencia de
+fin de una fila de la tabla de VC-36,
+**cuando** el fixture envía CLOSE después de esa secuencia,
+**entonces** `#{pane_dead}` vale 1 y `#{pane_dead_status}` es el valor de esa fila.
 
-**VC-36:** fixture controlable, corridas con status **0**, **7**, **263** y dos statuses
-**7 seguido de 9** antes de CLOSE; se observan respectivamente `pane_dead_status`
-0, 7, 7 y 7, con pane_dead=1 dentro de 2 s del CLOSE. 263 & 255 = 7: no asignar ese
-entero directamente a la representación de waitpid. El fixture usa `send_exit_status`
-y después close, guardando la secuencia; la shell real de VC-10a sigue siendo el
-control end-to-end normal. En quinta corrida, CLOSE sin status produce 255, sin
-esperar a otro proceso hijo ni inventar un status 0. Antes de cada fin, enviar
+**VC-36:** fixture controlable, una corrida por fila; `pane_dead=1` y el status
+esperado dentro de 2 s del CLOSE.
+
+| Secuencia antes de CLOSE | `pane_dead_status` |
+|---|---|
+| `send_exit_status(0)` | `0` |
+| `send_exit_status(7)` | `7` |
+| `send_exit_status(263)` | `7` (8 bits bajos) |
+| `send_exit_status(7)` y luego `send_exit_status(9)` | `7` (primer status) |
+| Ningún status | `255` |
+
+263 & 255 = 7: no asignar ese entero directamente a la representación de waitpid.
+El fixture guarda la secuencia; la shell real de VC-10a sigue siendo el control
+end-to-end normal. Sin status no se espera a otro proceso hijo ni se inventa un
+status 0. Antes de cada fin, enviar
 128 KiB de payload determinista y una marca calculada; pipe-pane conserva longitud/
 hash y marca completos en todas las variantes. Fds del bridge se liberan con el
 pane muerto aún presente. La [API de canal del fixture](https://docs.paramiko.org/en/stable/api/channel.html)
 permite enviar status y cerrar por separado; no es una API de tmux ni de libssh.
+
+### FR-22 · `respawn-window` sobre una ventana cuyo primer pane es SSH se rechaza
+
+**Dado** una ventana de dos panes cuyo primer pane (el que `spawn_window` reutiliza,
+`spawn.c:143`) es SSH y el segundo es local,
+**cuando** se ejecuta `respawn-window -k -t <ventana>`,
+**entonces** falla con `respawn window failed: cannot respawn an ssh pane`, código 1,
+y la ventana conserva sus dos panes y su layout.
+
+**VC-37:** guardar IDs, `#{window_layout}` y fds antes; ejecutar el comando y guardar
+status/stdout/stderr: exit 1, stdout vacío y stderr con la línea exacta. Después,
+`list-panes -t <ventana> -F '#{pane_id}'` sale 0 con los mismos dos IDs, el layout no
+cambia y una nueva marca remota prueba que el pane SSH sigue Activo. Repetir con el
+pane SSH muerto conservado por remain-on-exit, sin `-k`: mismo rechazo y mismo status
+anterior. Control: con el pane **local** primero y el SSH segundo, `respawn-window -k`
+sale 0, el pane local se recrea con PID positivo y el SSH se elimina con la misma baja
+de FR-11 (fds/conexión restaurados dentro de 2 s).
 
 ### BR-1 · `known_hosts` es solo lectura
 
@@ -1042,7 +1115,7 @@ una garantía sobre contenido arbitrario. Las claves del fixture no se teclean n
 imprimen desde la shell remota.
 
 **VC-15:** arrancar un server nuevo con `-vv`, rutas/logs exclusivos, y ejecutar éxito
-FR-4b, ausencia FR-5 y todas las fallas de identidad FR-17. Una herramienta externa
+FR-4, ausencia FR-5 y todas las fallas de identidad FR-17. Una herramienta externa
 lee la clave de prueba y busca, sin imprimirla, cabeceras PEM/OpenSSH, cada línea
 no vacía del cuerpo base64, su representación hexadecimal y la frase canario única
 de la clave cifrada en todos los logs de server/cliente/salida, stdout/stderr de los
@@ -1263,9 +1336,7 @@ respuesta del loop ni se cambian `server-client.c`/control mode para satisfacer 
 
 Este plan es parte de la **spec**, para el equipo que implemente después. No autoriza
 ni declara implementación en esta entrega: la consigna TP2 pide análisis/spec y
-prohíbe entregar C. Las iteraciones I1–I4 siguientes no son los pasos 1–8 de la
-revisión documental de esta entrega. El código de TP1 y su búsqueda GCS ya realizados
-no se repiten ni se convierten en una obligación de implementar TP2.
+prohíbe entregar C.
 
 La secuencia conserva cuatro iteraciones, con dependencias **I1 → I2 → I3 → I4**.
 Baseline por plataforma/configuración y fixture aislado se preparan antes de I1;
@@ -1318,7 +1389,8 @@ Antes de la **primera** apertura publicada, construir conjuntamente:
   reales y solicitud no bloqueante, incluyendo pendiente de apertura. FR-8 se cierra
   aquí; no esperar a I3 para evitar el fatal de `window.c:612-622`.
 - Respawn rechazado en apertura, Activo y pane muerto **antes** de la destrucción de
-  `spawn.c:312-349`; FR-12 se cierra aquí. Excluir SSH de las tres llamadas utempter,
+  `spawn.c:312-349`, y `respawn-window` rechazado antes de `spawn.c:143-154`;
+  FR-12 y FR-22 se cierran aquí. Excluir SSH de las tres llamadas utempter,
   también en el build on con `--enable-utempter`. El caso muerto de VC-12 puede usar
   un fallo de apertura ya cubierto, conservado con estado 255; no depende de I3.
 - Cancelación/cleanup idempotentes, status/PANE_STATUSREADY, EOF local y remain-on-exit:
@@ -1377,7 +1449,7 @@ no permiso para romperlos durante I2/I3.
 | FR-1 | VC-1 | I2 |
 | FR-2 | VC-2 | I2 |
 | FR-3 | VC-3 | I2 |
-| FR-4b | VC-4b | I2 |
+| FR-4 | VC-4 | I2 |
 | FR-5 | VC-5 | I2 |
 | FR-6a | VC-6a | I2 |
 | FR-6b | VC-6b | I2 |
@@ -1403,6 +1475,7 @@ no permiso para romperlos durante I2/I3.
 | FR-19 | VC-34 | I2 |
 | FR-20 | VC-35 | I3 |
 | FR-21 | VC-36 | I3 |
+| FR-22 | VC-37 | I2 |
 | BR-1 | VC-14 | I2 |
 | BR-2 | VC-15 | I2 |
 | NFR-1 | VC-16 | I4 |
@@ -1418,8 +1491,8 @@ no permiso para romperlos durante I2/I3.
 | INV-7 | VC-25 | I4 |
 | INV-8 | VC-26 | I4 |
 
-Son **43 filas**: 35 FR/BR/NFR y 8 invariantes, con 43 VCs principales distintos.
-Distribución de cierre: I1 = 1, I2 = 24, I3 = 7, I4 = 11. Esa cuenta mide cobertura
+Son **44 filas**: 36 FR/BR/NFR y 8 invariantes, con 44 VCs principales distintos.
+Distribución de cierre: I1 = 1, I2 = 25, I3 = 7, I4 = 11. Esa cuenta mide cobertura
 planificada, no pruebas pasadas ni esfuerzo estimado. FR-16a a FR-16d son filas
 separadas y mantienen VC-31a a VC-31d; no se omiten variantes por agrupar sus nombres.
 
@@ -1444,9 +1517,8 @@ no editar un comando existente, un fixture heredado o una métrica para ocultarl
 
 **Estado de esta entrega:** plan y cobertura revisados documentalmente. Ninguna
 iteración de implementación, build/regresión, fixture SSH o presupuesto fue ejecutado
-como parte del TP2. La auditoría final de los artefactos disponibles está registrada
-en las notas, apartado del paso 8, con sus límites. Este plan de C sigue siendo
-futuro; la revisión documental no acredita los resultados de sus VCs de ejecución.
+como parte del TP2; lo verificado está en las notas, apartado «Qué se verificó y
+cómo». La revisión documental no acredita los resultados de sus VCs de ejecución.
 
 ## Decisiones — resueltas
 
@@ -1456,7 +1528,7 @@ futuro; la revisión documental no acredita los resultados de sus VCs de ejecuci
 | ¿Dónde engancha en el spawn? | En **`spawn_pane`**, junto a `SPAWN_EMPTY`, con `SPAWN_SSH` | Reutiliza layout, entorno y el hook `pane-created` |
 | ¿`libssh` u OpenSSH? | **`libssh` ≥ 0.9**, enlace dinámico; LGPL-2.1-or-later | La consigna prohíbe invocar el binario. La API usada existe en 0.9.0 según sus headers; es una dependencia externa solo del build opt-in, siguiendo `configure.ac:512-514`. El mínimo de API no afirma que 0.9.0 sea una versión aconsejada para despliegue |
 | ¿Event loop? | `socketpair` + libssh no bloqueante + `event_set` | Reutiliza fd + `bufferevent` (INV-7) y el precedente `server.c:424-426`; descarta TCP crudo como fd del pane y un hilo aparte. Evita exigir libevent 2 para una base que admite 1.4 |
-| ¿Auth por claves o agent? | **Solo clave sin frase con `-i`**, sin prompts ni agent | Decisión confirmada en la revisión: la consigna permite elegir claves; el agent de libssh 0.9.0 hace esperas bloqueantes aun con la sesión no bloqueante. Evita ampliar la arquitectura con hilos/adaptadores; verifica el host antes de autenticar y usa `known_hosts` solo lectura |
+| ¿Auth por claves o agent? | **Solo clave sin frase con `-i`**, sin prompts ni agent | Decisión del equipo: la consigna permite elegir claves; el agent de libssh 0.9.0 hace esperas bloqueantes aun con la sesión no bloqueante. Evita ampliar la arquitectura con hilos/adaptadores; verifica el host antes de autenticar y usa `known_hosts` solo lectura |
 | ¿Qué guarda saca a no-Linux? | **`--enable-ssh` opt-in** que falla en no-Linux, **más** `#ifdef ENABLE_SSH_PANE` | Reutiliza la dependencia opcional de `--enable-systemd`/`--enable-cgroups`; SSH agrega su propio rechazo temprano por `$host_os`, ausente en ese precedente |
 | ¿Se resuelve DNS sin bloquear? | **No.** Se documenta como limitación | Confirmado en la fuente libssh 0.9.0: `getaddrinfo` se ejecuta antes de la conexión asíncrona; por eso NFR-1 mide con IP literal. La lectura de clave y `known_hosts` también es síncrona: no se promete latencia acotada de DNS o del filesystem |
 | ¿Se acepta un host desconocido? | **No** | Aceptarlo permitiría suplantación del host. La v1 exige confianza previa y excluye prompts/TOFU; un pane nuevo no aprende claves |

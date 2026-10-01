@@ -1237,17 +1237,193 @@ reflejo de teclas en capture mientras esa política lo impide. Tras reanudar, la
 marca local calculada de VC-16 vuelve a ser visible en ≤ 100 ms. No se relaja la
 respuesta del loop ni se cambian `server-client.c`/control mode para satisfacer un VC.
 
-## Plan de iteraciones
+## Plan de iteraciones — implementación futura
 
-| Iteración | Alcance | Cierra |
+Este plan es parte de la **spec**, para el equipo que implemente después. No autoriza
+ni declara implementación en esta entrega: la consigna TP2 pide análisis/spec y
+prohíbe entregar C. Las iteraciones I1–I4 siguientes no son los pasos 1–8 de la
+revisión documental de esta entrega. El código de TP1 y su búsqueda GCS ya realizados
+no se repiten ni se convierten en una obligación de implementar TP2.
+
+La secuencia conserva cuatro iteraciones, con dependencias **I1 → I2 → I3 → I4**.
+Baseline por plataforma/configuración y fixture aislado se preparan antes de I1;
+la misma base fijada en esta spec acompaña toda la comparación. "Cierre" en las tablas
+significa **objetivo de verificación futura**, no un PASS obtenido en este documento.
+
+| Iteración | Resultado previsto | Superficie propuesta | Condición para avanzar |
+|---|---|---|---|
+| **I1** | Build opt-in y registro del comando, sin panes SSH todavía | `configure.ac`, `Makefile.am`, registro guardado en `cmd.c`/`tmux.h`, scaffolds `cmd-ssh-pane.c` y `ssh-pane.c`; primeros scripts nuevos de build/registro | Guardas, fuentes/flags off/on y registro inspeccionados; FR-9 verificado. Comparaciones de compat/regresión aplicables sin fallos nuevos; límites del scaffold registrados |
+| **I2** | Primer recorrido completo: argumentos → layout → apertura SSH → shell interactiva, con cancelación/baja segura y protección de resize/respawn | Comando/bridge nuevos y ramas guardadas en `spawn.c`, `window.c`, `server-fn.c`, `tmux.h`; scripts de apertura/argumentos/seguridad y fixtures preparados | Todos los VCs asignados a I2 completos; una marca remota confirma shell real. Ningún pane publicado sin el mínimo de ciclo de vida descrito abajo |
+| **I3** | I/O y fin remoto comprobados con integridad: salida final, remain-on-exit, estado, cierre incompleto y pérdida activa | Completar el bridge dentro de la misma superficie; scripts de I/O/cierre y helper SSH controlable | Todos los VCs de I3 completos; datos finales íntegros y recursos liberados con pane muerto aún presente. Mantener verdes los casos ya cerrados |
+| **I4** | Presupuestos de latencia/RSS/colas, documentación y aceptación integrada del candidato completo | Scripts nuevos de medición/contrapresión y `tmux.1`; ajustes del bridge si las mediciones revelan defectos, dentro del alcance ya declarado | VCs de I4 más repetición de todos los VCs anteriores sobre el mismo candidato; baseline comparada y evidencia completa por plataforma/configuración |
+
+### I1 · Build y registro antes de una sesión remota
+
+Primero fijar `--enable-ssh` default off, rechazo no-Linux antes de consultar libssh,
+fuentes condicionales y guardas de código compartido. Declarar uso/alias/target del
+comando con la CLI definitiva; el scaffold puede responder `not implemented` a una
+apertura válida **solo como estado intermedio en la rama de desarrollo futura**.
+Ese resultado no satisface FR-2 ni una v1 entregable; no se incorpora al contrato
+público de errores de la spec. No se agrega todavía un pane con fd socket al server.
+
+Escribir/verificar en esta etapa los scripts de build/registro correspondientes;
+no esperar a I4 para empezar `regress/ssh-pane-*.sh`. FR-1 se asigna a I2 porque allí
+se completa también la comprobación por alias con apertura real de VC-2.
+Una biblioteca en una línea de enlace no prueba dependencia dinámica efectiva:
+el control positivo de VC-26 se termina con llamadas libssh reales desde I2. Si
+el scaffold no permite demostrar ese control, se registra parcial, no PASS de INV-8.
+
+### I2 · Publicar el pane solo con su ciclo de vida mínimo
+
+Preparar el sshd de loopback, listener sin banner, identidades/cuentas/socket propios
+y servidor SSH controlable de los VCs asignados. Sus helpers Python propuestos viven
+en el directorio temporal del fixture, generados/usados por scripts nuevos
+`regress/ssh-pane-*.sh`; no se presume que existan en tmux ni se agregan dependencias
+Python/Paramiko al build de producción. Sin esos prerrequisitos, el grupo queda
+no verificado; no se sustituye por una conexión personal ni por un skip silencioso.
+
+Antes de la **primera** apertura publicada, construir conjuntamente:
+
+- Validación de CLI, separación del puerto `-p` de la geometría, resolución de target,
+  layout, selección/`-P` y copia de parámetros/cwd/TERM. No ejecutar host/user como shell.
+- Contexto y socketpair con propiedad definida, fd + bufferevent comunes, callbacks
+  estables y avance no bloqueante. Transferencia inicial conserva bytes previos a
+  Activo y respeta escrituras parciales, presupuesto de callback y cotas propias.
+- Host key estricta antes de identidad, auth solo `-i`, canal/PTY/shell y deadline
+  único; diagnóstico/status asíncronos después de publicar. Fallo local anterior
+  deshace pane/layout; no deja contexto medio inicializado visible al loop.
+- Resize SSH apartado del ioctl de PTY desde el primer fd socket: usar dimensiones
+  reales y solicitud no bloqueante, incluyendo pendiente de apertura. FR-8 se cierra
+  aquí; no esperar a I3 para evitar el fatal de `window.c:612-622`.
+- Respawn rechazado en apertura, Activo y pane muerto **antes** de la destrucción de
+  `spawn.c:312-349`; FR-12 se cierra aquí. Excluir SSH de las tres llamadas utempter,
+  también en el build on con `--enable-utempter`. El caso muerto de VC-12 puede usar
+  un fallo de apertura ya cubierto, conservado con estado 255; no depende de I3.
+- Cancelación/cleanup idempotentes, status/PANE_STATUSREADY, EOF local y remain-on-exit:
+  baja en `server-fn.c:354-420` y `window_pane_destroy`, con identidad SSH persistente.
+  Kill o fallo de apertura retiran eventos/timers/callbacks/fds desde esta etapa.
+  No publicar un recurso nuevo cuyo destructor vaya a escribirse en I3.
+
+El recorrido de VC-2 ya necesita I/O básico **en ambas direcciones**; I3 amplía su
+verificación y completa casos de fin, no habilita recién el teclado/salida. El diseño
+acotado de colas/eventos existe desde I2, aunque su prueba de presión y presupuesto
+completo cierre en I4. Correr VC-16 ya aquí como control temprano del loop; NFR-1
+solo se cierra al verificar también la contrapresión de I4. Logs propios de medición
+se incorporan con sus recursos/estados, bajo BR-2, no después de fallar un ensayo.
+
+### I3 · Integridad y fin sin perder datos ni recursos
+
+Añadir las pruebas completas de teclado/salida ordenada, drenaje antes de EOF local,
+fin con remain-on-exit on/off, CLOSE/EOF/status distintos, gracia de cierre y pérdida
+activa. Verificar primer status/normalización de 8 bits, salida final y los 20 cierres
+con el pane muerto aún presente. No liberar en un callback libssh ni traducir un
+error de canal cerrado ya drenado a una pérdida TCP nueva.
+
+El helper de EOF/status/CLOSE y los VCs se construyen con esos casos; no se difieren
+a una etapa final de "tests". Repetir cancelación/ASan, resize/respawn y controles de
+logs de I2 al modificar callbacks, ownership o transición de cierre. Una dependencia
+sin instrumentar conserva el límite declarado; ASan no reemplaza integridad ni fds.
+
+### I4 · Aceptación con el candidato completo
+
+Ejecutar las corridas separadas definidas: mediciones normales de 200 MiB/RSS;
+contrapresión de 8 MiB por dirección con logs; pruebas instrumentadas funcionales.
+No usar números de un build ASan para cerrar rendimiento. Finalizar `tmux.1` con
+uso, alias, alcance Linux opt-in, defaults, política de host/clave, errores síncronos
+frente a asíncronos y limitaciones declaradas, sin cambiar docs de comandos existentes.
+Contrastar ese texto con los FRs/VCs; documentación sola no cierra comportamiento.
+
+El cierre integrado repite **todos** los VCs sobre un mismo hash candidato y la matriz
+base/off/on: Linux, macOS, FreeBSD y el par Linux con/sin utempter. Fuentes comunes,
+comandos, protocolo, PTY/parser y dependencia SSH excluida se comprueban con VC-19 a
+VC-26. Los cambios hechos para corregir una medición invalidan los resultados del
+hash anterior en las áreas afectadas; revalidar antes de declarar el candidato final.
+No agregar jobs de CI, tocar compat/osdep ni relajar presupuestos para hacer pasar
+un test. Ningún check realizado en una etapa anterior exime el cierre final.
+
+### Cobertura de cierre por requisito
+
+Cada fila asigna un único VC principal y una iteración de cierre. Los VCs mantienen
+su definición anterior; no se inventan VCs para rellenar la tabla. Dependencias
+citadas dentro de un VC y comprobaciones transversales también se ejecutan: por
+ejemplo, NFR-1 requiere el escenario de contrapresión de VC-27 además de VC-16.
+Los ocho invariantes rigen desde I1; su fila I4 identifica la aceptación completa,
+no permiso para romperlos durante I2/I3.
+
+| Requisito | VC principal | Cierre futuro |
 |---|---|---|
-| **1** | Guarda de build: `--enable-ssh`, `AM_CONDITIONAL`, `cmd-ssh-pane.c` vacío que registra el comando y responde "not implemented" | INV-1, INV-2, INV-3, INV-4, INV-8, FR-1, FR-9 |
-| **2** | Bridge: apertura, host key, auth, `socketpair`, enganche en `spawn_pane` y cierre/cancelación mínimos de recursos | FR-2, FR-3, FR-4b, FR-5, FR-6a, FR-6b, FR-11b, FR-13a, FR-13b, BR-1, BR-2, NFR-1, NFR-2 |
-| **3** | I/O completo: resize, salida, destrucción, `respawn-pane` | FR-7a, FR-7b, FR-8, FR-10a, FR-10b, FR-11, FR-12, FR-14, NFR-3, NFR-4, INV-5, INV-6, INV-7 |
-| **4** | Documentación y `regress/` | `tmux.1`, scripts `regress/ssh-pane-*.sh` |
+| FR-1 | VC-1 | I2 |
+| FR-2 | VC-2 | I2 |
+| FR-3 | VC-3 | I2 |
+| FR-4b | VC-4b | I2 |
+| FR-5 | VC-5 | I2 |
+| FR-6a | VC-6a | I2 |
+| FR-6b | VC-6b | I2 |
+| FR-7a | VC-7a | I3 |
+| FR-7b | VC-7b | I3 |
+| FR-8 | VC-8 | I2 |
+| FR-9 | VC-9 | I1 |
+| FR-10a | VC-10a | I3 |
+| FR-10b | VC-10b | I3 |
+| FR-11 | VC-11 | I2 |
+| FR-11b | VC-28 | I2 |
+| FR-12 | VC-12 | I2 |
+| FR-13a | VC-13a | I2 |
+| FR-13b | VC-13b | I2 |
+| FR-14 | VC-29 | I3 |
+| FR-15 | VC-30 | I2 |
+| FR-16a | VC-31a | I2 |
+| FR-16b | VC-31b | I2 |
+| FR-16c | VC-31c | I2 |
+| FR-16d | VC-31d | I2 |
+| FR-17 | VC-32 | I2 |
+| FR-18 | VC-33 | I2 |
+| FR-19 | VC-34 | I2 |
+| FR-20 | VC-35 | I3 |
+| FR-21 | VC-36 | I3 |
+| BR-1 | VC-14 | I2 |
+| BR-2 | VC-15 | I2 |
+| NFR-1 | VC-16 | I4 |
+| NFR-2 | VC-17 | I2 |
+| NFR-3 | VC-18 | I4 |
+| NFR-4 | VC-27 | I4 |
+| INV-1 | VC-19 | I4 |
+| INV-2 | VC-20 | I4 |
+| INV-3 | VC-21 | I4 |
+| INV-4 | VC-22 | I4 |
+| INV-5 | VC-23 | I4 |
+| INV-6 | VC-24 | I4 |
+| INV-7 | VC-25 | I4 |
+| INV-8 | VC-26 | I4 |
 
-La Iteración 1 es el camino más angosto: cierra la promesa de compat **antes** de escribir
-una línea de SSH.
+Son **43 filas**: 35 FR/BR/NFR y 8 invariantes, con 43 VCs principales distintos.
+Distribución de cierre: I1 = 1, I2 = 24, I3 = 7, I4 = 11. Esa cuenta mide cobertura
+planificada, no pruebas pasadas ni esfuerzo estimado. FR-16a a FR-16d son filas
+separadas y mantienen VC-31a a VC-31d; no se omiten variantes por agrupar sus nombres.
+
+### Evidencia y criterio de cierre futuro
+
+Cada ejecución registra ID del VC, hash base/candidato, etapa, plataforma/build,
+prerrequisitos, comando/status, observables y ruta de evidencia. Resultados: **PASS**
+solo con todos sus observables satisfechos, **FAIL** si una condición probada falla,
+o **NO VERIFICADO** con motivo/prerrequisito y límite de cobertura. Un grupo con
+variantes requiere todas; promedios, corridas elegidas o skips no sustituyen el cierre.
+Los logs se conservan fuera de los que el runner borra; claves/patrones privados no
+se guardan en los informes. Casos SSH off/no-Linux omitidos son omisiones esperadas,
+no PASS de su función; los VCs de guards/build sí se ejecutan en esas variantes.
+
+Para avanzar, no hay fallos nuevos de la suite existente respecto a la baseline,
+se satisfacen los VCs de la etapa y los controles transversales aplicables. Si falta
+una plataforma/prerrequisito, puede continuarse trabajo independiente en la rama,
+pero no declarar esa etapa verificada ni aceptar el candidato completo. I1 puede
+registrar control de enlace on pendiente del bridge; I4 no conserva esa excepción.
+Un cambio de comportamiento fuera de alcance requiere volver al análisis/spec,
+no editar un comando existente, un fixture heredado o una métrica para ocultarlo.
+
+**Estado de esta entrega:** plan y cobertura revisados documentalmente. Ninguna
+iteración de implementación, build/regresión, fixture SSH o presupuesto fue ejecutado
+como parte del TP2. La siguiente revisión de esta entrega es la auditoría documental
+final, que confronta consigna, notas, spec y capsule; no ejecuta este plan de C.
 
 ## Decisiones — resueltas
 

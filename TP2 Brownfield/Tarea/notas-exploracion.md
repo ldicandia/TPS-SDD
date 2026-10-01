@@ -581,3 +581,58 @@ Se comprobaron límites de 259 citas de tmux y se leyeron los bloques nuevos; es
 no reemplaza verificación semántica ni ejecución. Aritmética de payload/MiB/KiB y
 opciones de logging libssh coherentes; base tmux limpia en el hash fijado.
 `git diff --check` sin errores; solo los tres Markdown de TP2 modificados.
+
+
+## Orden de iteraciones y cobertura del paso 7 — 2026-09-30
+
+Se revisa únicamente el plan de la spec, con las decisiones/contratos de los pasos
+anteriores. Las iteraciones I1–I4 son para una implementación futura; los pasos de
+esta revisión documental no las ejecutan. TP2 prohíbe entregar C. TP1 mantiene su
+pipeline de gcsgrep en el mismo proyecto; su búsqueda GCS ya se hizo y no se repite.
+No obliga a implementar el cliente SSH ni autoriza modificar TP1 en este paso.
+
+El plan anterior dejaba resize/respawn y todos los tests demasiado tarde. La base
+releída confirma `window.c:612-622` (ioctl y fatal), `spawn.c:312-349` (respawn destruye
+fd/bufferevent/estado) y `server-fn.c:354-420` (cierre con conservación del pane).
+Resize sin ioctl, rechazo temprano de respawn, exclusión utempter, identidad SSH,
+status y cleanup deben estar antes del primer pane publicado en I2. El transporte
+inicial ya necesita I/O bidireccional/parcial y cotas; I3 completa datos finales/
+estados y su evidencia, no comienza recién a escribir un destructor o una entrada.
+
+Se conserva baseline y guardas primero, con registro de límites del scaffold. Su
+respuesta not implemented es solo un estado de una rama futura, nunca cierre de
+FR-2 ni error agregado al contrato final. FR-1 se cierra con alias/apertura en I2;
+FR-9 puede verificarse en I1. El control positivo de dependencia libssh necesita el
+bridge real; la línea de enlace del scaffold sola no se da por resultado de VC-26.
+Los ocho invariantes se controlan durante cada etapa y se cierran sobre el candidato
+completo en I4, también con on/no-Linux/utempter según la matriz de la spec.
+
+La prueba acompaña cada iteración: registro/build en I1, argumentos/apertura/auth/
+kill/resize/respawn en I2, integridad/cierre en I3 y medidas/documentación/aceptación
+integrada en I4. No se difieren todos los scripts a I4. Helpers propuestos son de
+fixture temporal, operados por scripts nuevos; no se añaden fuentes Python al build
+ni se presentan herramientas todavía no construidas como archivos reales de tmux.
+El runner/fixtures heredados y CI se conservan, comparando cero fallos nuevos.
+
+La tabla extrae el VC principal de cada FR/BR/NFR de la spec y agrega la asociación
+explícita de los invariantes. 43 filas, 43 requisitos/invariantes y 43 VCs distintos:
+I1 = 1, I2 = 24, I3 = 7, I4 = 11. Tiene todos los sub-IDs FR-16a…d / VC-31a…d.
+Dependencias internas a otros VCs también se requieren; NFR-1 se cierra en I4 por
+su contrapresión, aunque su control temprano VC-16 se corre desde I2. Resultados
+futuros registran hash/configuración/evidencia y PASS/FAIL/NO VERIFICADO; ninguna
+fila se marca PASS por estar listada. Un cambio posterior exige revalidación del
+candidato y no permite aceptar una comparación obtenida en otro hash.
+
+**Verificación de este paso:** lectura de consigna TP1/TP2, forma del ejemplo guiado,
+fuentes del riesgo y reconciliación de plan/IDs. El ejemplo se toma como formato;
+sus comandos no se ejecutan ni reemplazan la tarea tmux. No se escribió C, no se
+compiló ni se ejecutaron fixtures/regresiones. Queda el paso 8, auditoría documental
+final; no se declara completa la entrega ni implementado el plan futuro.
+
+Comprobaciones documentales finales del paso 7: las 43 filas cubren exactamente los
+35 FR/BR/NFR y 8 invariantes, sin duplicados ni VCs sin definir; cada asociación
+coincide con su VC principal. Distribución I1/I2/I3/I4: 1/24/7/11. FRs conservan
+Dado/Cuando/Entonces; enlaces relativos válidos y capsule de 100 líneas. Se
+comprobaron límites de 265 citas de tmux; la base sigue limpia en el hash fijado.
+`git diff --check` sin errores; solo los tres Markdown de TP2 modificados. Estos
+controles de texto no sustituyen ejecución ni certifican las métricas futuras.

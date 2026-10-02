@@ -1,0 +1,43 @@
+<!--
+  EJEMPLO — el CLAUDE.md de turnos-api, el proyecto ficticio de este ejemplo.
+
+  La forma a la que apunta: corto, escaneable, y todo lo que dice es siempre
+  verdadero sin importar en qué tarea estés trabajando. Se carga en CADA sesión,
+  así que cada línea es un impuesto permanente al contexto y tiene que ganarse
+  el lugar.
+-->
+
+# CLAUDE.md
+
+## Proyecto
+
+`turnos-api` — API de reserva de turnos médicos. Python 3.12, FastAPI, PostgreSQL.
+
+## Comandos
+
+- Test: `pytest -q`
+- Lint: `ruff check .`
+- Correr local: `uvicorn turnos.main:app --reload`
+
+## Convenciones
+
+- Errores de dominio como excepciones de `turnos/errors.py`, nunca `HTTPException`
+  fuera de `turnos/api/`.
+- Las fechas se guardan en UTC; se convierten a la zona del consultorio solo al
+  mostrarlas.
+- Nunca editar `turnos/generated/`.
+
+## Decisiones
+
+- Las decisiones de arquitectura están en `docs/adr/` (índice en
+  `docs/adr/README.md`). Antes de proponer un cambio de diseño, leé los ADRs
+  aceptados del tema.
+- Para registrar una decisión, usá el skill `write-adr`; para cambiar una
+  aceptada, `supersede-adr`.
+- Un ADR aceptado no se edita, y una dependencia nueva no entra sin ADR. Hay hooks
+  que lo hacen cumplir.
+
+## Límites
+
+- La unicidad de un turno la garantiza la base (ADR-0001). No agregues locks en
+  la aplicación.

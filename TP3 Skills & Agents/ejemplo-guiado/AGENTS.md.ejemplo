@@ -1,0 +1,48 @@
+<!--
+  EJEMPLO — el AGENTS.md de turnos-api, el proyecto ficticio de este ejemplo.
+
+  AGENTS.md es la fuente de verdad agnóstica de herramienta: lo leen Codex y Grok
+  Build, y Claude Code lo usa si no hay CLAUDE.md. La idea es mantener UN archivo
+  y que los específicos de cada herramienta apunten acá en vez de duplicarlo —
+  que es como se desincronizan.
+-->
+
+# AGENTS.md
+
+Instrucciones permanentes para cualquier agente de código que trabaje en este repo.
+
+## Qué es esto
+
+`turnos-api` — API de reserva de turnos médicos. Python 3.12, FastAPI, PostgreSQL.
+
+## Cómo trabajar acá
+
+- **Test:** `pytest -q`
+- **Lint:** `ruff check .`
+- Las fechas se guardan en UTC.
+- **Nunca edites `turnos/generated/`.**
+- **Nada de secretos en el repo**: ni en el código, ni en los tests, ni en la
+  configuración.
+
+## Decisiones de arquitectura
+
+Este repo registra sus decisiones en ADRs, en `docs/adr/`.
+
+- Antes de proponer un cambio de diseño, leé los ADRs aceptados del tema.
+- Una decisión nueva se registra con el skill `write-adr`; una que cambia, con
+  `supersede-adr`.
+- **Un ADR aceptado no se reescribe.** Solo se cambia su línea `Estado:`.
+- **Una dependencia nueva necesita su ADR**, en el mismo commit.
+
+## Dónde está cada cosa
+
+- ADRs: `docs/adr/`
+- Skills: `.claude/skills/` (Claude Code y Grok Build) · `.agents/skills/` (Codex)
+- Subagents: `.claude/agents/`
+- Hooks: `.claude/hooks/`
+
+<!--
+  Fijate lo que este archivo NO contiene: ningún flujo paso a paso, ninguna
+  plantilla de ADR. Eso está en los skills, que se cargan solo cuando la tarea
+  matchea. Acá va lo que es siempre verdadero y siempre necesario.
+-->

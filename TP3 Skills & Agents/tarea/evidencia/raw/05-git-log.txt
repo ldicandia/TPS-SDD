@@ -1,0 +1,11 @@
+--- git log antes
+b28ad1f Primera Iteracion TP3
+e912d57 Enunciado TP3
+M  tarea/evidencia/specs/gcsgrep-count.md
+--- git log después del veto
+b28ad1f Primera Iteracion TP3
+e912d57 Enunciado TP3
+M  tarea/evidencia/specs/gcsgrep-count.md
+--- git log después de corregir
+b4c1ad5 spec: gcsgrep --count
+b28ad1f Primera Iteracion TP3

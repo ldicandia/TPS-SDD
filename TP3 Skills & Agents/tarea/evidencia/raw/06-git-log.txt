@@ -1,9 +1,0 @@
---- git log antes
-e912d57 Enunciado TP3
-3c47097 fixes
-A  "TP3 Skills & Agents/tarea/evidencia/specs/gcsgrep-count.md"
-?? .claude/
---- git log después
-9059508 spec: gcsgrep --count
-e912d57 Enunciado TP3
-?? .claude/

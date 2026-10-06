@@ -1,41 +1,48 @@
 # Reproducción del veto de spec-gate (§7 de los criterios), 2026-10-06, GNU bash, version 5.2.37(1)-release (x86_64-pc-msys)
-# Clon descartable en el commit 9059508 (la spec ya commiteada por la sesión 07).
+# Proyecto: TP3 Skills & Agents/ de un clon descartable, en el commit b4c1ad5 (la spec ya commiteada por la sesión 06).
 
 ## Condición mala: se borra VC-FR-1 de la spec (sin stagear) y se alimenta el evento
 $ git status --short
- M "TP3 Skills & Agents/tarea/evidencia/specs/gcsgrep-count.md"
+ M tarea/evidencia/specs/gcsgrep-count.md
 
-$ echo '<evento: git commit -m prueba>' | CLAUDE_PROJECT_DIR=$PWD .claude/hooks/spec-gate.sh; echo exit=$?
+$ echo '<evento Bash: git commit -m prueba>' | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/spec-gate.sh; echo exit=$?
 spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
-TP3 Skills & Agents/tarea/evidencia/specs/gcsgrep-count.md:76: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+tarea/evidencia/specs/gcsgrep-count.md:73: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
 Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
 Para ver la spec entera: py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
 exit=2
 
-$ echo '<evento: git commit -am x>' | CLAUDE_PROJECT_DIR=$PWD .claude/hooks/spec-gate.sh; echo exit=$?
+$ echo '<evento Bash: git commit -am x>' | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/spec-gate.sh; echo exit=$?
 spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
-TP3 Skills & Agents/tarea/evidencia/specs/gcsgrep-count.md:76: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+tarea/evidencia/specs/gcsgrep-count.md:73: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
 Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
 Para ver la spec entera: py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
 exit=2
 
-$ echo '<evento: git -C . commit -m x>' | CLAUDE_PROJECT_DIR=$PWD .claude/hooks/spec-gate.sh; echo exit=$?
+$ echo '<evento Bash: git -C . commit -m x>' | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/spec-gate.sh; echo exit=$?
 spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
-TP3 Skills & Agents/tarea/evidencia/specs/gcsgrep-count.md:76: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+tarea/evidencia/specs/gcsgrep-count.md:73: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
 Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
 Para ver la spec entera: py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
 exit=2
 
-$ echo '<evento: cd . && git commit -m x>' | CLAUDE_PROJECT_DIR=$PWD .claude/hooks/spec-gate.sh; echo exit=$?
+$ echo '<evento Bash: cd . && git commit -m x>' | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/spec-gate.sh; echo exit=$?
 spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
-TP3 Skills & Agents/tarea/evidencia/specs/gcsgrep-count.md:76: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+tarea/evidencia/specs/gcsgrep-count.md:73: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
 Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
 Para ver la spec entera: py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
 exit=2
 
-$ echo '<evento: git --no-pager commit -m x>' | CLAUDE_PROJECT_DIR=$PWD .claude/hooks/spec-gate.sh; echo exit=$?
+$ echo '<evento Bash: git --no-pager commit -m x>' | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/spec-gate.sh; echo exit=$?
 spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
-TP3 Skills & Agents/tarea/evidencia/specs/gcsgrep-count.md:76: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+tarea/evidencia/specs/gcsgrep-count.md:73: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
+Para ver la spec entera: py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
+exit=2
+
+$ echo '<evento PowerShell: git commit -m x>' | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/spec-gate.sh; echo exit=$?
+spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
+tarea/evidencia/specs/gcsgrep-count.md:73: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
 Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
 Para ver la spec entera: py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
 exit=2

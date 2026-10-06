@@ -1,6 +1,6 @@
 # Transcripción — `04-trigger-negativo-pregunta.jsonl`
 
-- Sesión nueva `f757b54b-3c94-4dff-addd-047517f67d35` · modelo `claude-opus-5-5` · Claude Code 2.1.292
+- Sesión nueva `62bc230a-1af9-4d78-a188-5489563dc4d2` · modelo `claude-opus-5-5` · Claude Code 2.1.292
 - Skill del toolkit disponible: ['write-spec-brownfield'] · subagent: ['spec-reviewer']
 
 `→ Grep` {"pattern": "(?i)exit|código de salida|codigo de salida", "path": "C:\\Users\\Lucas Di Candia\\Desktop\\SDD\\TPS-SDD\\TP1 Greenfield\\Tarea\\gcsgrep-spec.md", "output_mode": "content", "-C": 2}
@@ -24,9 +24,9 @@
 … [6374 caracteres más]
 ```
 
-**Claude:** La spec (`TP1 Greenfield/Tarea/gcsgrep-spec.md:28`) usa la convención de `grep` con tres exit codes:
-- **`0`**: hubo al menos un match, ningún objeto falló y no se alcanzó ningún límite (FR-10).
-- **`1`**: no hubo matches en objetos legibles, el listado vino vacío o el único objeto tiene 0 bytes (FR-7, VC-18). **`2`**: hubo un error: URI o límite inválido, fallo de credenciales o de enumeración, un objeto que no se pudo leer o un límite de seguridad alcanzado. Se devuelve `2` aunque haya habido matches (FR-6, BR-3, NFR-2).
+**Claude:** - **0**: hubo al menos un match y la ejecución terminó sin objetos fallidos ni límites alcanzados (FR-10, `gcsgrep-spec.md:191`).
+- **1**: no hubo matches en objetos legibles, o el listado no devolvió ningún objeto, sin alcanzar un límite (FR-7, `:162`; también un objeto único de 0 bytes, VC-18).
+- **2**: hubo un error (URI inválido, flag de límite inválido, falla de enumeración o de credenciales, objeto fallido o límite de seguridad alcanzado), aunque haya habido matches (FR-6, BR-3, `:144`, `:338`).
 
 ---
 **Fin:** success · turnos 2 · 7 s

@@ -23,13 +23,13 @@ Todas las rutas de este README son relativas a `TP3 Skills & Agents/`.
 |---|---|---|---|---|
 | 📘 Skill `write-spec-brownfield` | [`.claude/skills/write-spec-brownfield/SKILL.md`](../.claude/skills/write-spec-brownfield/SKILL.md) + [`plantilla.md`](../.claude/skills/write-spec-brownfield/plantilla.md) + [`scripts/check_spec.py`](../.claude/skills/write-spec-brownfield/scripts/check_spec.py) | Arma `specs/<slug>.md` desde una plantilla que exige: base (hash), alcance dentro/fuera, invariantes con comando, cada FR en Dado/Cuando/Entonces con su `VC-FR-N` y cada decisión con `archivo:línea`. Un script valida todo eso y genera la tabla de trazabilidad. | **Cobertura de VCs** y **alcance acotado**; también **spec antes que código** y spec anclada a una revisión del código (brownfield, L2). | Cuando alguien pide especificar un cambio sobre código que ya existe, antes de implementarlo ("especificá…", "armá la spec antes de tocar código"). Carga sola. |
 | 👥 Subagent `spec-reviewer` | [`.claude/agents/spec-reviewer.md`](../.claude/agents/spec-reviewer.md) | Revisor de solo lectura (`tools: Read, Grep, Glob`). Abre cada `archivo:línea` que cita la spec, comprueba que los datos de cada VC alcancen para dar el resultado y devuelve un veredicto cerrado `READY` / `NEEDS WORK`, con hallazgos `spec:línea` y evidencia `archivo:línea`. | **Gate independiente**: quien revisa no es quien escribió. También **higiene de contexto**: las lecturas de código quedan en la ventana del subagent. | Lo lanza el skill en su paso 9. También cuando alguien pregunta "¿está lista esta spec?" o "revisala". |
-| 🪝 Hook `spec-gate` | [`.claude/hooks/spec-gate.sh`](../.claude/hooks/spec-gate.sh), registrado en [`.claude/settings.json`](../.claude/settings.json) | `PreToolUse` con matcher `Bash\|PowerShell`. Si el comando es un `git commit` y alguna spec de una carpeta `specs/` del proyecto (staged o modificada) no pasa `check_spec.py`, sale con `exit 2` y explica en stderr qué línea corregir. | **Cobertura de VCs** garantizada: no entra al repo una spec con un FR sin VC, una decisión sin ancla o un TBD. | Siempre. Corre solo en cada comando de shell del agente y deja pasar todo lo que no es un commit. |
+| 🪝 Hook `spec-gate` | [`.claude/hooks/spec-gate.sh`](../.claude/hooks/spec-gate.sh), registrado en [`.claude/settings.json`](../.claude/settings.json) | `PreToolUse` con matcher `Bash\|PowerShell`. Ante un `git commit` detectado, valida por separado el contenido del índice y la copia de trabajo de las specs staged o modificadas. Si alguno no pasa `check_spec.py`, sale con `exit 2` e identifica la fuente y la línea a corregir. | **Cobertura de VCs**: aplica la validación estructural al contenido staged y conserva el control de la copia de trabajo, con los límites de detección indicados abajo. | Corre en cada comando de shell del agente; chequea los commits que reconoce. |
 
 ### Por qué cada pieza está en ese recurso
 
 - **Skill:** especificar es un flujo que repetimos en el TP1 y el TP2, y solo hace falta cuando aparece esa situación. Por eso carga con la `description` y no ocupa contexto en cada sesión. Lo determinístico (que cada FR tenga su VC, que cada decisión tenga ancla, la tabla de trazabilidad) lo hace `check_spec.py`, no el modelo.
 - **Subagent:** su valor es la **independencia**. Si la sesión que escribió la spec también la revisa, hereda sus supuestos. Además, verificar anclas es trabajo ruidoso. En la evidencia 01, el revisor hizo 8 llamadas a herramientas y usó 34.816 tokens en su ventana, y la sesión principal recibió solo el informe (unos 7.500 caracteres). Lleva `tools: Read, Grep, Glob` para que el "no edites" lo garantice la configuración y no solo el brief. No lleva `Bash`, y por eso no ejecuta los VCs: verifica leyendo.
-- **Hook:** el skill pide la cobertura de VCs y el revisor la revisa, pero los dos persuaden. El hook es lo único que garantiza que ninguna spec incompleta llegue a un commit hecho por el agente.
+- **Hook:** el skill pide la cobertura de VCs y el revisor la revisa. El hook bloquea los commits que detecta si las specs examinadas no pasan el checker, incluso cuando una copia de trabajo corregida oculta una versión staged inválida.
 
 ### Cómo componen
 
@@ -59,7 +59,9 @@ la misma estructura dentro de la carpeta donde se abre la sesión:
 - Ningún paquete de pip.
 
 **Probado en:** Windows 11 Pro, Git Bash 5.2.37 y Python 3.14 (vía `py`). En Linux y macOS
-tendría que bastar con `python3`, pero no lo corrimos ahí.
+tendría que bastar con `python3`. La corrección de validación del índice se probó en
+macOS con Bash 3.2 y Python 3.14 mediante las 12 regresiones de evidencia 08;
+esa corrección aún no se volvió a ejecutar dentro de Claude Code en Windows.
 
 **Bit de ejecución:** en Windows git no lo registra solo. Al commitear el toolkit, corré
 desde la raíz del repo:
@@ -78,7 +80,10 @@ que tiene que listar `PreToolUse · Bash|PowerShell`, y `/agents`, que tiene que
 
 | Caso | Resultado |
 |---|---|
-| `git commit …` con una spec en `specs/` (staged o modificada) que no pasa `check_spec.py` | `exit 2` y stderr con `archivo:línea: problema — qué hacer` |
+| `git commit …` con una spec en `specs/` (staged o modificada) cuyo índice o copia de trabajo no pasa `check_spec.py` | `exit 2` y stderr con `[staged]` / `[copia de trabajo]` y `archivo:línea: problema — qué hacer` |
+| Spec inválida staged, corregida o borrada del disco sin actualizar el índice | `exit 2`: Git conserva el contenido inválido staged |
+| Spec corregida y vuelta a stagear; ambas versiones válidas | `exit 0` |
+| Eliminación staged de una spec, sin archivo recreado en disco | `exit 0`: el índice ya no contiene esa spec |
 | Variantes de commit: `git commit -am`, `git -C . commit`, `cd x && git commit`, `git --no-pager commit` | `exit 2`: la regex decide por contenido, no por el tool |
 | El mismo commit lanzado con la herramienta PowerShell en vez de Bash | `exit 2` |
 | `git commit` con todas las specs bien, o sin specs tocadas | `exit 0` |
@@ -86,12 +91,23 @@ que tiene que listar `PreToolUse · Bash|PowerShell`, y `/agents`, que tiene que
 | Evento ilegible, falta Python o no se puede entrar al proyecto | `exit 2` con el motivo (falla cerrada) |
 
 Tarda unos 0,5 s por comando de shell en Windows y 0,75 s en un commit.
+Estas mediciones son anteriores a la corrección del índice; validar ambas versiones
+puede ejecutar el checker dos veces por spec.
+
+**Política para `commit -a` y commits con rutas:** se validan conservadoramente las
+dos versiones de todas las specs staged o modificadas dentro del proyecto, sin
+intentar calcular la selección exacta de esos comandos. Un índice inválido bloquea
+aunque `-a` o una ruta fueran a reemplazarlo por una copia de trabajo válida. Una
+copia de trabajo inválida también bloquea un commit normal con índice válido.
+Para continuar, corregí la spec y sincronizá el índice con `git add`; si la eliminás,
+stageá la eliminación con `git add -u`. El hook solo lee: nunca cambia el índice.
 
 **Límites conocidos:**
 
 - No es un git hook: un `git commit` que hace una persona en su terminal no pasa por él. Su trabajo es ser el guardrail del agente.
 - Solo chequea archivos `.md` dentro de una carpeta `specs/` **dentro del proyecto** (`git diff --relative`). Las specs del TP1 y del TP2, con otro formato y fuera de esta carpeta, no se tocan.
 - Con `git -C <otro-repo> commit`, el hook mira el diff del proyecto actual, no el de ese otro repo.
+- La detección por regex aún puede omitir `git -C` con rutas entre comillas que contienen espacios. Una spec nueva incorporada por `git add … && git commit …` en el mismo comando tampoco está en el índice cuando corre `PreToolUse`. Son límites de detección pendientes, separados de la corrección del contenido staged.
 
 ### Dos defectos que encontró la evidencia (y cómo quedaron)
 
@@ -115,9 +131,12 @@ un **clon descartable** del repo con el toolkit copiado.
 | 05 | **El hook bloquea un commit.** En la spec staged faltaba `VC-FR-3` y D-2 se fundaba en "lo decidimos así en el equipo". El agente intenta `git commit`, recibe `exit 2` con el stderr y no lo esquiva: explica las dos líneas y pide confirmación antes de inventar el fundamento. `git log` sigue en `b28ad1f`. | [`05-hook-bloquea.md`](evidencia/05-hook-bloquea.md) · [`raw/05-git-log.txt`](evidencia/raw/05-git-log.txt) |
 | 06 | **El agente corrige con el stderr y el commit pasa.** Es la misma sesión retomada: agrega el VC, ancla D-2 a `src/gcsgrep/cli.py:96`, `check_spec.py` da OK, vuelve a commitear y el hook deja pasar el commit (`b4c1ad5`). | [`06-hook-corrige-y-pasa.md`](evidencia/06-hook-corrige-y-pasa.md) · [`raw/05-git-log.txt`](evidencia/raw/05-git-log.txt) |
 | 07 | Reproducción del §7 alimentando el hook por stdin. Condición mala: `exit 2` en las cinco variantes de commit y con PowerShell. Comandos que no son commit: `exit 0`. Evento malformado: `exit 2`. Condición buena: `exit 0`. | [`07-hook-reproduccion.txt`](evidencia/07-hook-reproduccion.txt) |
+| 08 | Regresiones de la corrección del índice: bloquea specs staged inválidas aunque se corrijan o borren del disco; permite volver a stagear la corrección y eliminar una spec del índice; mantiene la política conservadora para `-a`, rutas y eventos PowerShell. Cada caso usa un repo temporal y comprueba que el hook no altere el índice. Es ejecución directa del hook, sin una sesión nueva de Claude. | [`08-hook-indice.txt`](evidencia/08-hook-indice.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 
 Las sesiones 01–04 corrieron antes de los dos arreglos de arriba. Ninguna intentó un commit,
 y la spec de 01 da OK también con el `check_spec.py` actual.
+Las evidencias 05–07 también son anteriores a la corrección del índice; se conservan
+como historial. La evidencia 08 verifica el hook corregido.
 
 ### Casos de trigger del skill (como VCs)
 
@@ -146,6 +165,9 @@ echo "$EVENT" | CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/spec-gate.sh; echo 
 
 # Chequeo directo de una spec
 py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py tarea/evidencia/specs/gcsgrep-count.md
+
+# Regresiones del índice: crean y eliminan repositorios temporales
+python3 -m unittest discover -s tarea/tests -v  # Windows: py -3 en lugar de python3
 ```
 
 La condición mala necesita que la spec figure como modificada para git, es decir, que esté

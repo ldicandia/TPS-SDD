@@ -1,0 +1,33 @@
+# Corrección 1 — validación del contenido del índice, 2026-10-07
+# Ejecución directa de spec-gate en macOS, con Bash 3.2 y Python 3.14.
+# No es una transcripción de Claude Code. Cada test crea un repositorio temporal
+# con una baseline ficticia, llama al hook con JSON por stdin y elimina el repo.
+# El repositorio del equipo no se commitea ni se stagea en estas pruebas.
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tarea/tests -v
+test_commit_a_checks_both_versions (test_spec_gate.SpecGateIndexTests.test_commit_a_checks_both_versions) ... ok
+test_commit_with_path_checks_both_versions (test_spec_gate.SpecGateIndexTests.test_commit_with_path_checks_both_versions) ... ok
+test_invalid_index_stays_blocked_after_worktree_deletion (test_spec_gate.SpecGateIndexTests.test_invalid_index_stays_blocked_after_worktree_deletion) ... ok
+test_invalid_index_stays_blocked_after_worktree_fix (test_spec_gate.SpecGateIndexTests.test_invalid_index_stays_blocked_after_worktree_fix) ... ok
+test_new_invalid_staged_spec_blocks_after_worktree_fix (test_spec_gate.SpecGateIndexTests.test_new_invalid_staged_spec_blocks_after_worktree_fix) ... ok
+test_non_commit_passes_with_invalid_index (test_spec_gate.SpecGateIndexTests.test_non_commit_passes_with_invalid_index) ... ok
+test_powershell_event_validates_index (test_spec_gate.SpecGateIndexTests.test_powershell_event_validates_index) ... ok
+test_restage_fixed_spec_passes (test_spec_gate.SpecGateIndexTests.test_restage_fixed_spec_passes) ... ok
+test_staged_deletion_passes (test_spec_gate.SpecGateIndexTests.test_staged_deletion_passes) ... ok
+test_staged_deletion_with_invalid_recreated_file_blocks (test_spec_gate.SpecGateIndexTests.test_staged_deletion_with_invalid_recreated_file_blocks) ... ok
+test_valid_index_invalid_worktree_blocks_conservatively (test_spec_gate.SpecGateIndexTests.test_valid_index_invalid_worktree_blocks_conservatively) ... ok
+test_valid_staged_change_passes (test_spec_gate.SpecGateIndexTests.test_valid_staged_change_passes) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 2.174s
+
+OK
+
+Los tests bloqueantes exigen exit 2, fuente [staged] o [copia de trabajo],
+ruta original de la spec y diagnóstico de FR-1 sin VC. Los casos válidos exigen
+exit 0 y stderr vacío. Todas las llamadas comprueban con git write-tree que el
+árbol del índice es idéntico antes y después del hook.
+
+Alcance: contenido staged y política conservadora para -a y commits con rutas.
+No verifica los límites de detección pendientes de la regex ni una nueva sesión
+de Claude Code en Windows. Las evidencias 05–07 corresponden al hook anterior.

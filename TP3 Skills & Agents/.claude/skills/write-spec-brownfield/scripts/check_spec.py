@@ -2,6 +2,7 @@
 """Chequea que una spec brownfield (plantilla de write-spec-brownfield) no tenga huecos.
 
 Uso: python3 check_spec.py specs/<slug>.md [...]
+     python3 check_spec.py --stdin specs/<slug>.md < contenido-del-indice
 Imprime la tabla de trazabilidad de cada spec. Sale 0 si todas pasan y 1 si alguna falla.
 Cada problema sale como `archivo:línea: problema — qué hacer`.
 """
@@ -38,8 +39,8 @@ def filas(lines, desde, hasta):
     return out
 
 
-def check(path):
-    lines = open(path, encoding="utf-8").read().splitlines()
+def check(path, content=None):
+    lines = (open(path, encoding="utf-8").read() if content is None else content).splitlines()
     errs = []
     err = lambda n, msg: errs.append(f"{path}:{n}: {msg}")
     heads = [(n, l) for n, l in enumerate(lines, 1) if l.startswith("#")] + [(len(lines) + 1, "#")]
@@ -125,9 +126,16 @@ def main(paths):
     if not paths:
         print(__doc__, file=sys.stderr)
         return 1
+    if paths[0] == "--stdin":
+        if len(paths) != 2:
+            print(__doc__, file=sys.stderr)
+            return 1
+        inputs = [(paths[1], sys.stdin.buffer.read().decode("utf-8"))]
+    else:
+        inputs = [(p, None) for p in paths]
     total = []
-    for p in paths:
-        errs, traza = check(p)
+    for p, content in inputs:
+        errs, traza = check(p, content)
         total += errs
         estado = "OK" if not errs else f"{len(errs)} problemas"
         print(f"{p}: {estado} — {len({r for r, _ in traza})} requerimientos, {len(traza)} VCs\n")

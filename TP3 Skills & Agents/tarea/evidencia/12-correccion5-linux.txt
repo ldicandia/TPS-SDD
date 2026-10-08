@@ -4,9 +4,10 @@
 # Plataforma: Linux 5.15.0-198-generic
 # Python: 3.10.12
 # Bash: GNU bash, version 5.1.16(1)-release (x86_64-pc-linux-gnu)
-# Base Git: ea81441ae2ac3ec9b7236493a85411a364d76a3c + cambios locales de la corrección 5
+# Base Git: ea81441ae2ac3ec9b7236493a85411a364d76a3c (corrida del 2026-10-08)
 
-# SHA-256 de las piezas entregadas (manifiesto vigente: cubre las correcciones 4 y 5)
+# SHA-256 de las piezas entregadas. Manifiesto vigente: cubre las correcciones 4 y 5,
+# a diferencia del de la evidencia 10, anterior a ambas.
 da1dd4e42fc0e11b039d8757c0e8ede8b53d80b55f3fc7772f9864e1d52c5c4f  .claude/hooks/spec-gate.sh
 3812c2da08a7c8bbaa5450518c6f489ffd98f9d35c9c180b6b8c2ecde089ecf4  .claude/hooks/commit_command.py
 ae552895d4939ef5c0cacbe0fd64e6f3e5beac4d8a27f2bc690fdc251bec61e6  .claude/settings.json
@@ -18,7 +19,7 @@ b52f22dc50dafa6bb7098ace87344d10307193bc8b74fde5aecc60b99993b84d  .claude/skills
 41922c9e697c7eccacec937680dfe55eea425fa00e3bce1a34e03eb479c4ba27  tarea/tests/fixtures.py
 724004e2c209be79003ecefaa4497b740e69dbb3765710dc454b34de1b3a211f  tarea/tests/test_check_spec.py
 c0557234866292013b62821eed57102d7b62679bf82c7fe72c4e7c65ceec40d3  tarea/tests/test_spec_gate.py
-003e32ee11d9de7c7a307c462a64685cbcb870a17ce4695ddf2fab2723c2e8d1  tarea/evidencia/transcribir.py
+69402bd8ae34135a6ba1f56cba979edb9ec632d714f59370ebc0c2fee9a5d0d7  tarea/evidencia/transcribir.py
 30ccbf1e0ce97bfabaa952f44f13f8d85b8f34ee307fa5c6f59281d642b28ae2  tarea/evidencia/specs/gcsgrep-count.md
 51821dc8725c706a6292c53516fb0c611babe7abfd82055bf156aab70798a6f4  tarea/README.md
 bc8a8cb1cba4d942369057371160231ab2c0b4bb06975e0a950ceaa2ceaebe60  tarea/ENTREGA.md
@@ -86,7 +87,7 @@ Prefijos como time/sudo no convierten un commit en otro comando. ... ok
 test_wrappers_without_a_commit_still_pass (test_spec_gate.SpecGateIndexTests) ... ok
 
 ----------------------------------------------------------------------
-Ran 54 tests in 4.082s
+Ran 54 tests in 4.439s
 
 OK
 

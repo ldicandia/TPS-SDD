@@ -1,5 +1,7 @@
 # TP3 — Toolkit SDD: specs brownfield que no salen con huecos
 
+> Índice de entrega (integrantes, artefactos, cómo verificar): [`ENTREGA.md`](ENTREGA.md).
+
 Un skill, un subagent y un hook que encodean cómo especificamos un cambio sobre código
 existente. Lo armamos a partir de los defectos que nos marcaron en las correcciones del
 TP1 y del TP2:
@@ -50,6 +52,14 @@ cumplir el hook es la misma que pide el skill: una sola fuente de verdad.
   nombra qué se mide; umbral y carga incluyen números con unidad o condición.
   Los números de anclas `archivo:línea` o `archivo:inicio-fin` no cuentan como
   medida. Si el cambio no necesita NFR, se elimina esa sección completa.
+- Cada decisión cita un `archivo:línea` cuya extensión empieza con letra
+  (`cli.py:96`, `README.md:12`). Un `3.1:20` o un `v1.2:30` no son un archivo:
+  pegarle un número a "lo pide la consigna" no la convierte en fundamento.
+- La sección `## Trazabilidad` es obligatoria, con la tabla que imprime el script.
+- Lo que va entre backticks no se analiza como prosa: `--api-version=v2` o
+  `/storage/v2/objects` no son "alcance futuro", y `<stdin>` o
+  `<application/json>` no son placeholders sin completar. Lo que sí se rechaza es
+  "queda para v2" o "lo vemos más adelante" dentro de un requerimiento.
 
 `OK` significa que pasó estos controles y los demás controles estructurales del
 script. El checker no ejecuta los VCs, no verifica que las anclas existan y no
@@ -105,7 +115,9 @@ la misma estructura dentro de la carpeta donde se abre la sesión:
 **Dependencias:**
 
 - `bash` y `git`. En Windows, el bash que trae Git for Windows.
-- Python ≥ 3.8 accesible como `python3`, `python` o `py -3`. El hook prueba los tres en ese orden.
+- Python ≥ 3.8 accesible como `python3`, `python` o `py -3`. El hook prueba los tres en ese
+  orden y comprueba la versión, no solo que el intérprete arranque: donde `python` es 2.7
+  lo descarta en vez de fallar después con un `SyntaxError`.
 - No hace falta `jq`: el JSON del evento se parsea con Python.
 - Ningún paquete de pip.
 
@@ -120,8 +132,8 @@ En Windows, los tests de `tarea/tests` necesitan que `bash` resuelva al de Git f
 Windows: si WSL está instalado, Python encuentra antes `C:\Windows\System32\bash.exe`
 y las regresiones del hook fallan por el entorno, no por el hook.
 
-**Bit de ejecución:** en Windows git no lo registra solo. Al commitear el toolkit, corré
-desde la raíz del repo:
+**Bit de ejecución:** los dos scripts están commiteados con modo `100755`. En Windows git
+no lo registra solo; si lo perdés, desde la raíz del repo:
 
 ```bash
 git add --chmod=+x "TP3 Skills & Agents/.claude/hooks/spec-gate.sh" "TP3 Skills & Agents/.claude/skills/write-spec-brownfield/scripts/check_spec.py"
@@ -144,7 +156,10 @@ que tiene que listar `PreToolUse · Bash|PowerShell`, y `/agents`, que tiene que
 | `git commit -am`, `git -C . commit`, `git -C "/ruta con espacios" commit`, `git --no-pager commit` | Valida ambas versiones y bloquea si alguna spec es inválida; `-C` debe apuntar al mismo repositorio |
 | `git add … && git commit …`, `cd x && git commit …`, o commit junto con otras operaciones | `exit 2`, aun con specs válidas: pedí llamadas separadas para inspeccionar el índice después del `add` |
 | `git -C <otro-repo> commit` o evento con `cwd` de otro repositorio | `exit 2`: requiere una sesión y un hook en ese otro proyecto |
+| `time git commit …`, `sudo git commit …`, `nohup`, `nice -n 5`, `timeout 5`, `env`, `command`, `exec` | `exit 2`: un prefijo no convierte el commit en otro comando |
 | `echo "git commit"`, `git log --grep commit` | `exit 0`: son menciones, no invocaciones de commit |
+| Comando que no se puede partir (comillas sin cerrar) y **no** menciona `commit` | `exit 0`: `echo $'don'\''t'` no es asunto del gate |
+| Comando que no se puede partir y **sí** menciona `commit` | `exit 2`: no se puede inspeccionar, falla cerrada |
 | El mismo commit lanzado con la herramienta PowerShell en vez de Bash | `exit 2` |
 | `git commit` con todas las specs bien, o sin specs tocadas | `exit 0` |
 | Cualquier comando que no sea un commit (`git status`, `pytest`, `ls`, …) | `exit 0`, aunque haya una spec rota |
@@ -165,8 +180,11 @@ y saltos de línea entre operaciones) bloquean un comando que incluye un commit.
 Los separadores dentro del mensaje del commit se tratan como texto.
 Los overrides `-c`, variables de entorno antepuestas, opciones globales desconocidas
 y rutas `-C` con variables/expresiones se rechazan para los commits detectados.
-El mensaje de bloqueo indica la alternativa: llamadas independientes y rutas
-literales. El clasificador nunca ejecuta el comando recibido.
+Lo mismo con los prefijos que envuelven un comando (`time`, `sudo`, `nohup`, `nice`,
+`stdbuf`, `timeout`, `xargs`, `env`, `command`, `exec`, …): si después de uno de
+ellos aparece un `git … commit`, se bloquea sin intentar adivinar qué argumentos
+eran del wrapper. El mensaje de bloqueo indica la alternativa: llamadas
+independientes y rutas literales. El clasificador nunca ejecuta el comando recibido.
 
 **Política para `commit -a` y commits con rutas:** se validan conservadoramente las
 dos versiones de todas las specs staged o modificadas dentro del proyecto, sin
@@ -179,14 +197,16 @@ stageá la eliminación con `git add -u`. El hook solo lee: nunca cambia el índ
 **Límites conocidos:**
 
 - No es un git hook: un `git commit` que hace una persona en su terminal no pasa por él. Su trabajo es ser el guardrail del agente.
-- Solo chequea archivos `.md` dentro de una carpeta `specs/` **dentro del proyecto** (`git diff --relative`). Las specs del TP1 y del TP2, con otro formato y fuera de esta carpeta, no se tocan.
-- No es un intérprete completo de Bash o PowerShell: no se garantiza detectar commits ocultos en aliases, funciones, scripts o invocaciones indirectas como `bash -c '…'`. Para esas formas hace falta un git hook adicional; usá las invocaciones directas documentadas.
-- En Windows, para `-C` usá rutas literales entre comillas con `/` (`C:/ruta con espacios`). Las correcciones nuevas aún no tienen una corrida nativa allí.
+- Solo chequea archivos `.md` bajo una carpeta `specs/` **dentro del proyecto** (`git diff --relative`), incluidas sus subcarpetas (`specs/2026-10/x.md`). Un `.md` fuera de `specs/` no se valida. Las specs del TP1 y del TP2, con otro formato y fuera de esta carpeta, no se tocan.
+- No es un intérprete completo de Bash o PowerShell: no se garantiza detectar commits ocultos en aliases, funciones, scripts o invocaciones indirectas como `bash -c '…'`. Los prefijos conocidos (`time`, `sudo`, `env`, …) sí se bloquean, pero la lista es enumerada, no exhaustiva. Para esas formas hace falta un git hook adicional; usá las invocaciones directas documentadas.
+- En Windows, para `-C` usá rutas literales entre comillas con `/` (`C:/ruta con espacios`). La corrección 5 aún no tiene una corrida nativa allí: se verificó en Linux (evidencia 12).
 
-### Dos defectos que encontró la evidencia (y cómo quedaron)
+### Defectos que encontró la evidencia (y cómo quedaron)
 
 - **Bypass por otro tool.** En Windows, Claude Code tiene una herramienta PowerShell además de Bash. En una corrida, el agente commiteó con PowerShell y el hook, que entonces tenía matcher `Bash`, no se enteró. El matcher pasó a `Bash|PowerShell`, que reciben el mismo `tool_input.command`. Las sesiones 05–07 se volvieron a correr con esa versión.
 - **Falso positivo de `check_spec.py`.** Con `re.I`, la palabra "todo" ("con todo el prefijo") se marcaba como un `TODO` pendiente. Ahora `TBD`/`TODO` solo cuentan en mayúsculas.
+- **Los tests mutaban la spec de evidencia.** `test_check_spec.py` y `test_spec_gate.py` leían `evidencia/specs/gcsgrep-count.md` como fixture. Cuando la sesión del 2026-10-08 regeneró esa spec y le salió sin NFR, 18 tests se pusieron en rojo sin que hubiera cambiado una sola pieza del toolkit. El fixture pasó a [`tests/fixtures.py`](tests/fixtures.py); que la spec entregada siga pasando se comprueba aparte, en `test_delivered_spec_passes`.
+- **Huecos del gate y del checker (corrección 5).** Una spec en `specs/<subcarpeta>/x.md` se commiteaba sin validar; `time git commit` y `sudo git commit` pasaban mientras `env git commit` bloqueaba; un comando benigno con comillas sin cerrar se vetaba como si fuera un commit; `v2` de una versión de API contaba como alcance futuro y `3.1:20` como fundamento `archivo:línea`. Todos con regresión propia en evidencia 12.
 
 ## Evidencia
 
@@ -209,6 +229,7 @@ un **clon descartable** del repo.
 | 09 | Regresiones de los comandos, incluidas las 12 del índice: rutas `-C` entre comillas, commits compuestos con specs nuevas, destino externo, menciones que no deben disparar y mensajes con operadores como texto. Guarda la salida real y hashes de los archivos probados; cada caso comprueba que el hook no cambie el árbol del índice. | [`09-hook-comandos.txt`](evidencia/09-hook-comandos.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 10 | Corrección del checker: 16 tests de campos FR/NFR y VCs, más las 23 regresiones anteriores del hook y 2 nuevas de bloqueo estructural en índice/copia de trabajo. Incluye salida real, hashes y comprobación directa de la spec adaptada. | [`10-checker-estructura.txt`](evidencia/10-checker-estructura.txt) · [`tests/test_check_spec.py`](tests/test_check_spec.py) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 11 | Revisión manual del criterio de severidad y veredicto: casos de los cinco controles, falta de evidencia, detalles editoriales e instrucciones incrustadas; comprueba consistencia entre brief, skill y README. No es una ejecución nueva del subagent. | [`11-reviewer-criterios.md`](evidencia/11-reviewer-criterios.md) |
+| 12 | **Corrección 5, y primera corrida en Linux.** 54 tests (los 41 anteriores, 12 nuevos de la corrección 5 y 1 que valida la spec entregada), más la reproducción directa de cada hueco cerrado: spec en `specs/<subcarpeta>/`, prefijos `time`/`sudo`/`nice`/`timeout`, comandos benignos con comillas sin cerrar, `v2` de una API, fundamentos `3.1:20`, datos `<stdin>` y la sección `## Trazabilidad`. Cada `exit=` es el código real del hook. Ejecución directa, no una sesión de Claude Code. | [`12-correccion5-linux.txt`](evidencia/12-correccion5-linux.txt) · [`tests/fixtures.py`](tests/fixtures.py) |
 
 Las sesiones 01, 05 y 06 y la reproducción 07 se volvieron a correr el 2026-10-08 con las
 piezas de `4de0e91`, que incluyen las correcciones del índice, de los comandos, del checker
@@ -217,8 +238,16 @@ La 01 partió sin spec. Su resultado se commiteó en el clon como base (`4a4ede9
 la 05 se stageó esa spec sin `VC-FR-3` y con D-2 sin ancla.
 Las sesiones 02–04 son anteriores a esas correcciones y no intentan commits: solo prueban
 el trigger, que depende de la `description`, sin cambios desde entonces.
-Las evidencias 08–10 son tests directos, no sesiones de Claude Code. La 11 documenta el
+Las evidencias 08–10 y la 12 son tests directos, no sesiones de Claude Code. La 11 documenta el
 criterio de veredicto por revisión manual, y la 01 lo muestra aplicado en una corrida real.
+
+Los hashes SHA-256 que publica cada evidencia valen para el momento de esa corrida.
+Las correcciones 4 y 5 cambiaron archivos después de la evidencia 10, así que el
+manifiesto vigente es el de la **evidencia 12**: es el único que cubre las nueve piezas
+del toolkit más los tests y la spec, en el estado en que se entregan.
+La corrección 5 no volvió a correr el flujo dentro de Claude Code: toca el gate y el
+checker, no el brief ni las `description`, y la 01/05/06 siguen siendo la evidencia de
+que el flujo completo corre.
 
 ### Casos de trigger del skill (como VCs)
 
@@ -245,12 +274,16 @@ echo "$EVENT" | CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/spec-gate.sh; echo 
 cp /tmp/spec.bak "$SPEC"
 echo "$EVENT" | CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/spec-gate.sh; echo "exit=$?"   # exit=0
 
-# Chequeo directo de una spec
-py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py tarea/evidencia/specs/gcsgrep-count.md
+# Chequeo directo de una spec (en Windows, py -3 en lugar de python3)
+python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py tarea/evidencia/specs/gcsgrep-count.md
 
 # Regresiones del checker y del hook: usan repositorios temporales para el hook
 python3 -m unittest discover -s tarea/tests -v  # Windows: py -3 en lugar de python3
 ```
 
 La condición mala necesita que la spec figure como modificada para git, es decir, que esté
-commiteada. Si todavía no lo está, stageala (`git add`) antes del `sed`.
+commiteada. Si todavía no lo está, stageala (`git add`) antes del `sed`. En macOS el
+`sed -i` pide un sufijo: `sed -i '' '/^- \*\*VC-FR-1\*\*/d' "$SPEC"`.
+
+La corrida de esos cuatro bloques en Linux, con su salida completa, está en
+[`evidencia/12-correccion5-linux.txt`](evidencia/12-correccion5-linux.txt).

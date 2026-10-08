@@ -1,11 +1,14 @@
 --- git log antes
-b28ad1f Primera Iteracion TP3
-e912d57 Enunciado TP3
+4a4ede9 evidencia: spec gcsgrep --count de la sesión 01
+cffc0d7 evidencia: quitar spec para regenerarla
+4de0e91 fix(tp3): definir bloqueantes y criterio READY del revisor
 M  tarea/evidencia/specs/gcsgrep-count.md
 --- git log después del veto
-b28ad1f Primera Iteracion TP3
-e912d57 Enunciado TP3
+4a4ede9 evidencia: spec gcsgrep --count de la sesión 01
+cffc0d7 evidencia: quitar spec para regenerarla
+4de0e91 fix(tp3): definir bloqueantes y criterio READY del revisor
 M  tarea/evidencia/specs/gcsgrep-count.md
 --- git log después de corregir
-b4c1ad5 spec: gcsgrep --count
-b28ad1f Primera Iteracion TP3
+4cec3a5 spec: gcsgrep --count
+4a4ede9 evidencia: spec gcsgrep --count de la sesión 01
+cffc0d7 evidencia: quitar spec para regenerarla

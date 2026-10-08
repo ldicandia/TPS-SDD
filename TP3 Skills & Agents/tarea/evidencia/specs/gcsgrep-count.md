@@ -1,28 +1,26 @@
 # Spec — flag `-c` / `--count` en `gcsgrep`
 
-**Base:** `TPS-SDD` @ `b28ad1f38606bfdaf7e9059c92411c97eaf99e77` · **Fecha:** 2026-10-06
+**Base:** `TP1 Greenfield/Tarea` @ `cffc0d7a6f856fa0f89881279f66766d2b48a819` · **Fecha:** 2026-10-08
 
-El proyecto que cambia es `gcsgrep`, en `TP1 Greenfield/Tarea/` del repo `TPS-SDD`.
-Todas las rutas de esta spec (`src/…`, `tests/…`, `README.md`) son relativas a esa
-carpeta, y los comandos de los VC se corren desde ahí.
-
-Los VC de comportamiento usan el mismo arnés que la suite existente: `run(argv, blobs)`
-de `tests/test_gcsgrep.py:71-77`, con `FakeBlob(nombre, contenido)` y el bucket `B`.
-"Objeto `x` = `contenido`" quiere decir `FakeBlob("x", b"contenido")`.
+Todas las rutas de esta spec son relativas a `TP1 Greenfield/Tarea/` y todos los
+comandos se corren desde esa carpeta. Los VC escritos como `run([...], [...])`
+usan el helper `run` y la clase `FakeBlob` de `tests/test_gcsgrep.py:25-77`
+(cliente falso, bucket `B`); el resultado es la tupla `(exit code, stdout, stderr)`.
 
 ## Propósito
 
-Quien busca un patrón en un bucket puede saber cuántas líneas coinciden en cada objeto
-sin recibir las líneas.
+Quien busca un texto en un bucket puede saber cuántas líneas coinciden en cada objeto
+sin tener que leer ni contar las líneas impresas.
 
 ## Términos
 
 | Término | Significa |
 |---|---|
-| línea coincidente | Línea de un objeto que contiene el patrón (sin distinguir mayúsculas si va `-i`), con la misma regla de `find_matches` (`src/gcsgrep/matcher.py:4-10`). Una línea que contiene el patrón tres veces es una sola línea coincidente. |
-| conteo | Cantidad de líneas coincidentes de un objeto, contadas de la primera a la última línea. |
+| objeto | Un blob listado bajo la ubicación `gs://bucket/prefijo`, identificado en la salida por su URI `gs://<bucket>/<nombre>`. |
+| línea coincidente | Una línea de un objeto que contiene el patrón literal (con `-i`, sin distinguir mayúsculas). Una línea con varias apariciones del patrón es una sola línea coincidente. |
+| conteo | La cantidad de líneas coincidentes de un objeto. |
 | modo conteo | Ejecución de `gcsgrep` con `-c` o `--count`. |
-| objeto completo | Objeto cuya lectura terminó sin excepción. No es objeto completo uno que falló al abrirse o a mitad de lectura (`src/gcsgrep/gcs.py:165-170`). |
+| objeto fallido | Objeto cuya lectura o decodificación UTF-8 falla y se reporta en stderr con `gcsgrep: no se pudo leer …`. |
 
 ## Alcance
 
@@ -30,131 +28,182 @@ sin recibir las líneas.
 
 | Archivo / módulo | Qué cambia |
 |---|---|
-| `src/gcsgrep/cli.py` | `build_parser` agrega `-c`/`--count` (`store_true`, ayuda "muestra la cantidad de líneas que coinciden por objeto"). En modo conteo, `main` no imprime líneas y en su lugar imprime `gs://bucket/objeto:N` por cada objeto completo con conteo ≥ 1. |
-| `src/gcsgrep/gcs.py` | `_scan_blob` devuelve el conteo (entero) en lugar de `bool`, y 0 cuando saltea el objeto (`.gz` o binario); `scan` acepta un callback opcional `on_count(uri, conteo)` que llama una vez por objeto completo con conteo ≥ 1, después de terminar ese objeto. `result.matched` pasa a `True` cuando el conteo es ≥ 1. |
-| `tests/test_gcsgrep.py` | Un test por cada VC-FR y VC-NFR de esta spec, con el arnés `run`/`FakeBlob` existente, nombrados `test_count_fr<N>_…` / `test_count_nfr1_…` para que no los seleccionen los filtros `-k "vcN"` de los invariantes. |
-| `README.md` | La línea de uso pasa a `gcsgrep [-i] [-n] [-c] …` y se documenta el formato `gs://bucket/objeto:N`. |
+| `src/gcsgrep/cli.py` | `build_parser` agrega `-c/--count` (`store_true`). En modo conteo, `main` acumula el conteo por objeto en lugar de imprimir cada línea coincidente, descarta el conteo de un objeto fallido e imprime `<uri>:<conteo>` por objeto cuando `scan` vuelve o lanza `CostLimitReached` / `GcsGrepError` (D-3). |
+| `tests/test_gcsgrep.py` | Se agregan 14 tests unitarios, uno por cada VC de FR-1 a FR-14, sin modificar ni borrar los 41 existentes. |
+| `README.md` | La sección "Uso" documenta `-c` / `--count` y su formato de salida (FR-15). |
 
 ### Fuera
 
 | Qué queda afuera | Por qué |
 |---|---|
-| Contar ocurrencias en lugar de líneas | El pedido es "cuántas líneas coinciden"; además el matcher solo decide por línea (`src/gcsgrep/matcher.py:9`). |
-| Imprimir objetos con conteo 0 (`gs://B/x:0`) | Ver D-2: rompería "sin coincidencias → stdout vacío" y con el límite por defecto podrían ser 1.000 líneas de ceros. |
-| Una línea de total sumando los objetos | No se pidió; se obtiene con `awk -F: '{s+=$NF} END {print s}'` sobre la salida. |
-| Otros flags de grep (`-l`, `-o`, `-v`, `-m`) | Cada uno cambia otra semántica de salida; no forman parte de este cambio. |
-| Tests específicos de progreso y `--max-bytes` en modo conteo | Esas rutas viven en `scan` antes y después de cada objeto (`src/gcsgrep/gcs.py:145-148`, `src/gcsgrep/gcs.py:172-174`) y no dependen de cómo se emite la salida; el cambio no las toca y FR-6 ya ejercita el corte por límite en modo conteo. |
-| `src/gcsgrep/matcher.py` | El conteo reutiliza `find_matches` tal cual (D-5); no hace falta tocarlo. |
-| Tests de integración `tests/integration/test_emulator.py` | Requieren emulador o GCP real y se saltean sin ellos (`tests/integration/test_emulator.py:29-31`); los VC de esta spec son deterministas con el cliente falso. Los existentes no se modifican. |
-| La spec original `gcsgrep-spec.md` del TP1 | Esta spec es el delta sobre la base; la original no se reescribe. |
+| `src/gcsgrep/gcs.py` y `src/gcsgrep/matcher.py` | `scan` ya entrega cada línea coincidente con la URI del objeto (`gcs.py:154-155`); contar se resuelve en el callback de la CLI sin cambiar la API de escaneo. |
+| Imprimir `<uri>:0` para objetos sin coincidencias | Ver D-1: no hay señal de "objeto terminado" en `scan`, y hoy un objeto sin coincidencias no produce salida. |
+| Total agregado de todos los objetos | No fue pedido: el pedido es un conteo por objeto. |
+| Contar apariciones del patrón en vez de líneas | `-c` cuenta líneas coincidentes (D-5); contar apariciones sería otro flag. |
+| Otros flags tipo grep (`-l`, `-m/--max-count`, `-o`, `-v`) | No forman parte de este cambio. |
+| Tests nuevos en `tests/integration/test_emulator.py` | Requieren emulador o GCP (`tests/integration/test_emulator.py:29`); el comportamiento nuevo vive en `cli.py` y se cubre con el cliente falso. Los tests de integración existentes sí deben seguir pasando (INV-2). |
 
 ## Invariantes
 
-### INV-1 · La suite unitaria existente sigue verde
+### INV-1 · La suite existente sigue verde
 
-Los tests de `tests/test_gcsgrep.py` en la base pasan sin modificarlos.
+Sin emulador, la suite completa pasa: 41 tests unitarios existentes + 14 nuevos, y los 31 de integración se saltean igual que en la base.
 
-- **VC-INV-1** · `python -m pytest -q tests/test_gcsgrep.py` → ningún `failed`, exit 0; los tests preexistentes no cambian de nombre ni de aserciones.
+- **VC-INV-1** · `py -3 -m pytest -q` → `55 passed, 31 skipped`, 0 failed, exit 0
 
-### INV-2 · Sin `-c`, la salida es idéntica a la de la base
+### INV-2 · Los tests existentes no se modifican
 
-Sin modo conteo se imprime `uri:texto` o `uri:N:texto` con `-n`, en orden de listado y de línea (`src/gcsgrep/cli.py:63-67`).
+El cambio solo agrega líneas a `tests/test_gcsgrep.py` y no toca `tests/integration/test_emulator.py`.
 
-- **VC-INV-2** · `python -m pytest -q tests/test_gcsgrep.py -k "vc4 or vc19 or vc26 or vc5 or vc29"` → todos pasan, exit 0.
+- **VC-INV-2** · `git diff cffc0d7 -- tests/ | grep -v "^---" | grep -c "^-"` → `0` (ninguna línea existente borrada ni modificada)
 
-### INV-3 · Exit codes, errores, progreso y límites no cambian sin `-c`
+### INV-3 · La suite de integración existente sigue verde contra el emulador
 
-0 con coincidencias, 1 sin coincidencias, 2 con error o límite (`src/gcsgrep/cli.py:87-96`); el aviso de progreso cada 100 objetos y los límites `--max-objects`/`--max-bytes` funcionan igual.
+Los tests de `tests/integration/test_emulator.py` ejecutan el CLI real (`python -m gcsgrep`, `tests/integration/test_emulator.py:132`), que este cambio toca.
 
-- **VC-INV-3** · `python -m pytest -q tests/test_gcsgrep.py -k "vc6 or vc7 or vc30 or vc8 or vc11 or vc12 or vc16 or vc20 or vc21 or vc22 or vc23 or vc24 or vc25 or vc27"` → todos pasan, exit 0.
+- **VC-INV-3** · `docker compose up -d --wait` y luego `STORAGE_EMULATOR_HOST=http://localhost:4588 GOOGLE_CLOUD_PROJECT=floci-local py -3 -m pytest -q tests/integration` → `31 passed`, 0 failed, 0 skipped, exit 0
+
+### INV-4 · Sin `-c` la salida no cambia
+
+Sin `-c`, cada línea coincidente se imprime como `gs://B/a.log:timeout 1`, o `gs://B/a.log:2:timeout 1` con `-n` (`cli.py:63-67`).
+
+- **VC-INV-4** · `run(["-n", "timeout", "gs://B/"], [FakeBlob("a.log", b"x\ntimeout 1\ntimeout 2\n")])` → `(0, "gs://B/a.log:2:timeout 1\ngs://B/a.log:3:timeout 2\n", "")`
+
+### INV-5 · Sin `-c` los exit codes conservan su significado
+
+0 = hubo al menos una línea coincidente, 1 = ninguna, 2 = error o límite (`cli.py:87-96`). Con `-c` los mismos códigos se exigen en FR-1, FR-4, FR-8, FR-9, FR-12, FR-13 y FR-14.
+
+- **VC-INV-5** · `py -3 -m pytest -q tests/test_gcsgrep.py -k "vc7 or vc20 or vc21 or vc22 or vc11"` → `10 passed`, 0 failed, exit 0
 
 ## Requerimientos
 
-### FR-1 · `-c` imprime el conteo de cada objeto en lugar de las líneas
+### FR-1 · `-c` imprime un conteo por objeto en lugar de las líneas
 
-- **Dado** el objeto `app/a.log` = `timeout timeout\nok\ntimeout\n` y el objeto `app/b.log` = `connection timeout\n`, listados en ese orden
-- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/app/`
-- **Entonces** stdout tiene una línea `gs://B/app/<objeto>:<conteo>` por objeto, en orden de listado, sin ninguna línea del contenido; la primera línea de `a.log` cuenta una sola vez; exit 0
-- **VC-FR-1** · `run(["-c", "timeout", "gs://B/app/"], [FakeBlob("app/a.log", b"timeout timeout\nok\ntimeout\n"), FakeBlob("app/b.log", b"connection timeout\n")])` → stdout `gs://B/app/a.log:2\ngs://B/app/b.log:1\n`, stderr vacío, exit 0
-
-### FR-2 · `--count` es equivalente a `-c`
-
-- **Dado** los mismos dos objetos de FR-1
-- **Cuando** se ejecuta `gcsgrep --count timeout gs://B/app/`
-- **Entonces** la salida, el stderr y el exit code son idénticos a los de `-c`
-- **VC-FR-2** · `run(["--count", "timeout", "gs://B/app/"], [FakeBlob("app/a.log", b"timeout timeout\nok\ntimeout\n"), FakeBlob("app/b.log", b"connection timeout\n")])` → stdout `gs://B/app/a.log:2\ngs://B/app/b.log:1\n`, stderr vacío, exit 0; y `main(["--help"])` dentro de `pytest.raises(SystemExit)` (como `tests/test_gcsgrep.py:421-422`) → código 0 y `capsys.readouterr().out` contiene `-c, --count`
-
-### FR-3 · Los objetos con conteo 0 no se imprimen
-
-- **Dado** el objeto `app/a.log` = `healthy\n` y el objeto `app/b.log` = `timeout\n`
-- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/app/`, y aparte `gcsgrep -c timeout gs://B/ok/` con solo el objeto `ok/c.log` = `healthy\n`
-- **Entonces** en el primer caso solo aparece `b.log` y el exit es 0; en el segundo stdout queda vacío y el exit es 1, como sin `-c`
-- **VC-FR-3** · `run(["-c", "timeout", "gs://B/app/"], [FakeBlob("app/a.log", b"healthy\n"), FakeBlob("app/b.log", b"timeout\n")])` → stdout `gs://B/app/b.log:1\n`, exit 0; `run(["-c", "timeout", "gs://B/ok/"], [FakeBlob("ok/c.log", b"healthy\n")])` → stdout `""`, stderr `""`, exit 1
-
-### FR-4 · `-c` respeta `-i` e ignora `-n`
-
-- **Dado** el objeto `app.log` = `TIMEOUT\nTimeout\ntimeout\n`
-- **Cuando** se ejecuta `gcsgrep -c -i timeout gs://B/`, `gcsgrep -c timeout gs://B/` y `gcsgrep -c -n -i timeout gs://B/`
-- **Entonces** con `-i` cuenta las tres variantes, sin `-i` cuenta solo la exacta, y agregar `-n` no cambia la salida de modo conteo
-- **VC-FR-4** · con `[FakeBlob("app.log", b"TIMEOUT\nTimeout\ntimeout\n")]`: `run(["-c", "-i", "timeout", "gs://B/"], …)` → `gs://B/app.log:3\n`, exit 0; `run(["-c", "timeout", "gs://B/"], …)` → `gs://B/app.log:1\n`, exit 0; `run(["-c", "-n", "-i", "timeout", "gs://B/"], …)` → `gs://B/app.log:3\n`, exit 0
-
-### FR-5 · Un objeto que falla no imprime conteo y la búsqueda sigue
-
-- **Dado** el objeto `partial/mixed.log` = `timeout 1\ncaf\xe9 timeout 2\ntimeout 3\n` (la segunda línea no es UTF-8) y el objeto `partial/ok.log` = `timeout\n`
-- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/partial/`
-- **Entonces** `mixed.log` no aparece en stdout (no es objeto completo, aunque su primera línea coincida), el error va a stderr con el formato de la base, `ok.log` sí se imprime y el exit es 2
-- **VC-FR-5** · `run(["-c", "timeout", "gs://B/partial/"], [FakeBlob("partial/mixed.log", b"timeout 1\ncaf\xe9 timeout 2\ntimeout 3\n"), FakeBlob("partial/ok.log", b"timeout\n")])` → stdout `gs://B/partial/ok.log:1\n`, stderr empieza con `gcsgrep: no se pudo leer gs://B/partial/mixed.log:`, exit 2
-
-### FR-6 · Al alcanzar un límite se conservan los conteos ya impresos
-
-- **Dado** los objetos `a.log` = `timeout\n` y `b.log` = `timeout\n`
-- **Cuando** se ejecuta `gcsgrep -c --max-objects 1 timeout gs://B/`
-- **Entonces** el conteo de `a.log` se imprime, `b.log` no se abre, stderr informa el límite y el exit es 2
-- **VC-FR-6** · `run(["-c", "--max-objects", "1", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout\n"), FakeBlob("b.log", b"timeout\n")])` → stdout `gs://B/a.log:1\n`, stderr contiene `gcsgrep: límite de seguridad alcanzado: máximo 1 objetos`, `b.log` con `opened is False`, exit 2
-
-### FR-7 · Los objetos salteados no imprimen conteo
-
-- **Dado** el objeto `bin.dat` = `timeout\x00x`, el objeto `c.GZ` = `timeout` y el objeto `app.log` = `timeout\n`
+- **Dado** el bucket `B` con `a.log` = `timeout 1\nok\ntimeout 2\n` y `b.log` = `timeout\n`, listados en ese orden
 - **Cuando** se ejecuta `gcsgrep -c timeout gs://B/`
-- **Entonces** solo aparece `app.log`; los binarios y `.gz` se saltean como en la base (`src/gcsgrep/gcs.py:94-101`), sin stderr
-- **VC-FR-7** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("bin.dat", b"timeout\x00x"), FakeBlob("c.GZ", b"timeout"), FakeBlob("app.log", b"timeout\n")])` → stdout `gs://B/app.log:1\n`, stderr `""`, exit 0
+- **Entonces** stdout tiene una línea `<uri>:<conteo>` por objeto, en el orden del listado, ninguna línea de texto del objeto, stderr vacío y exit code 0
+- **VC-FR-1** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout 1\nok\ntimeout 2\n"), FakeBlob("b.log", b"timeout\n")])` → `(0, "gs://B/a.log:2\ngs://B/b.log:1\n", "")`
 
-### FR-8 · El conteo incluye la última línea sin terminador
+### FR-2 · `--count` es sinónimo de `-c`
 
-- **Dado** el objeto `edge/nonl.log` = `a\nb timeout` (sin `\n` final)
-- **Cuando** se ejecuta `gcsgrep -c "" gs://B/edge/` (patrón vacío: coincide con cada línea)
-- **Entonces** el conteo es 2
-- **VC-FR-8** · `run(["-c", "", "gs://B/edge/"], [FakeBlob("edge/nonl.log", b"a\nb timeout")])` → stdout `gs://B/edge/nonl.log:2\n`, exit 0
+- **Dado** el mismo bucket que FR-1
+- **Cuando** se ejecuta `gcsgrep --count timeout gs://B/`
+- **Entonces** la salida y el exit code son idénticos a los de `-c`
+- **VC-FR-2** · `run(["--count", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout 1\nok\ntimeout 2\n"), FakeBlob("b.log", b"timeout\n")])` → `(0, "gs://B/a.log:2\ngs://B/b.log:1\n", "")`
 
-### NFR-1 · El modo conteo lee por streaming, igual que la base
+### FR-3 · Un objeto sin líneas coincidentes no imprime conteo
 
-- **Métrica** Tamaños solicitados al stream (`blob.stream.read_sizes`), cantidad de lecturas y archivos locales creados; se registran las lecturas y se parchean `open`/`tempfile` para fallar si se intenta crear un archivo.
-- **Umbral** Cada lectura solicita como máximo 65.536 bytes (`CHUNK_SIZE`), se realizan al menos 3 lecturas y se crean 0 archivos locales.
-- **Carga** Modo conteo sobre 1 objeto de más de 73.728 bytes (`SAMPLE_SIZE + CHUNK_SIZE`), con 3 líneas, 2 coincidentes y la segunda cruzando ese límite, como en el VC siguiente.
+- **Dado** el bucket `B` con `a.log` = `nada\n` y `b.log` = `timeout\n`
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/`
+- **Entonces** stdout solo tiene la línea de `b.log` y el exit code es 0
+- **VC-FR-3** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"nada\n"), FakeBlob("b.log", b"timeout\n")])` → `(0, "gs://B/b.log:1\n", "")`
 
-- **VC-NFR-1** · test análogo a `test_vc3_matches_crossing_chunk_boundaries_without_local_files` (`tests/test_gcsgrep.py:136-163`) con el mismo contenido de 3 líneas (2 coincidentes, la segunda cruzando `SAMPLE_SIZE + CHUNK_SIZE`), `open`/`tempfile` parcheados para fallar, ejecutando `run(["-c", "timeout", "gs://logs/"], [blob])` → stdout `gs://logs/big.log:2\n`, `len(blob.stream.read_sizes) > 2`, cada tamaño en `(0, 65536]`, exit 0
+### FR-4 · Sin líneas coincidentes en ningún objeto, stdout vacío y exit 1
+
+- **Dado** el bucket `B` con `a.log` = `nada\n`
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/`
+- **Entonces** stdout y stderr quedan vacíos y el exit code es 1
+- **VC-FR-4** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"nada\n")])` → `(1, "", "")`
+
+### FR-5 · Se cuentan líneas, no apariciones
+
+- **Dado** el bucket `B` con `a.log` = `timeout timeout timeout\n`
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/`
+- **Entonces** el conteo de `a.log` es 1
+- **VC-FR-5** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout timeout timeout\n")])` → `(0, "gs://B/a.log:1\n", "")`
+
+### FR-6 · `-i` aplica al conteo
+
+- **Dado** el bucket `B` con `a.log` = `TIMEOUT\nTimeout\ntimeout\nok\n`
+- **Cuando** se ejecuta `gcsgrep -c -i timeout gs://B/`
+- **Entonces** el conteo de `a.log` es 3
+- **VC-FR-6** · `run(["-c", "-i", "timeout", "gs://B/"], [FakeBlob("a.log", b"TIMEOUT\nTimeout\ntimeout\nok\n")])` → `(0, "gs://B/a.log:3\n", "")`
+
+### FR-7 · `-n` no altera la salida del modo conteo
+
+- **Dado** el bucket `B` con `a.log` = `x\ntimeout\n`
+- **Cuando** se ejecuta `gcsgrep -c -n timeout gs://B/`
+- **Entonces** la salida es la misma que sin `-n`, sin número de línea y sin error
+- **VC-FR-7** · `run(["-c", "-n", "timeout", "gs://B/"], [FakeBlob("a.log", b"x\ntimeout\n")])` → `(0, "gs://B/a.log:1\n", "")`
+
+### FR-8 · Un objeto fallido no imprime conteo y el escaneo sigue
+
+- **Dado** el bucket `B` con `mixed.log` = `timeout 1\ncaf\xe9 timeout 2\n` (la segunda línea no es UTF-8 válido) y `ok.log` = `timeout\n`
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/`
+- **Entonces** stdout solo tiene el conteo de `ok.log`, stderr empieza con `gcsgrep: no se pudo leer gs://B/mixed.log:` y el exit code es 2
+- **VC-FR-8** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("mixed.log", b"timeout 1\ncaf\xe9 timeout 2\n"), FakeBlob("ok.log", b"timeout\n")])` → exit code `2`, stdout `"gs://B/ok.log:1\n"`, stderr empieza con `"gcsgrep: no se pudo leer gs://B/mixed.log:"`
+
+### FR-9 · Al alcanzar un límite se imprimen los conteos de los objetos ya escaneados
+
+- **Dado** el bucket `B` con `a.log` = `timeout\n` y `big.log` = `timeout\n` con tamaño declarado `1024**3 + 1` bytes
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/` con el límite de bytes por defecto
+- **Entonces** stdout tiene el conteo de `a.log`, `big.log` no se abre, stderr informa el límite y el exit code es 2
+- **VC-FR-9** · `big = FakeBlob("big.log", b"timeout\n", size=1024**3 + 1); run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout\n"), big])` → exit code `2`, stdout `"gs://B/a.log:1\n"`, stderr contiene `"gcsgrep: límite de seguridad alcanzado: máximo 1073741824 bytes"` y `big.opened is False`
+
+### FR-10 · Los objetos `.gz` y binarios se saltean también en modo conteo
+
+- **Dado** el bucket `B` con `a.gz` = `timeout\n`, `b.bin` = `\x00timeout\n` y `c.log` = `timeout\n`
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/`
+- **Entonces** solo `c.log` tiene conteo
+- **VC-FR-10** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.gz", b"timeout\n"), FakeBlob("b.bin", b"\x00timeout\n"), FakeBlob("c.log", b"timeout\n")])` → `(0, "gs://B/c.log:1\n", "")`
+
+### FR-11 · La ayuda documenta el flag
+
+- **Dado** el paquete instalado o `src` en el `PYTHONPATH`
+- **Cuando** se ejecuta `gcsgrep --help`
+- **Entonces** la ayuda lista `-c, --count` y el exit code es 0
+- **VC-FR-11** · `main(["--help"])` con `capsys` de pytest → lanza `SystemExit` con `code == 0` y `capsys.readouterr().out` contiene `-c, --count`
+
+### FR-12 · Si el listado falla a mitad del escaneo se imprimen los conteos ya acumulados
+
+- **Dado** un cliente cuyo `list_blobs` entrega `FakeBlob("a.log", b"timeout\n")` y después lanza `RuntimeError("page 2")`
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://B/`
+- **Entonces** stdout tiene el conteo de `a.log`, stderr informa el fallo de enumeración y el exit code es 2
+- **VC-FR-12** · `main(["-c", "timeout", "gs://B/"], client_factory=<cliente cuyo list_blobs es un generador que hace yield FakeBlob("a.log", b"timeout\n") y luego raise RuntimeError("page 2")>, stdout=..., stderr=...)` → exit code `2`, stdout `"gs://B/a.log:1\n"`, stderr `"gcsgrep: no se pudo enumerar gs://B/: page 2\n"`
+
+### FR-13 · Con `-c`, un URI inválido termina con 2 antes de escanear
+
+- **Dado** la ubicación `logs/app`, sin el esquema `gs://`
+- **Cuando** se ejecuta `gcsgrep -c timeout logs/app`
+- **Entonces** stdout queda vacío, stderr informa el URI inválido y el exit code es 2
+- **VC-FR-13** · `run(["-c", "timeout", "logs/app"])` → `(2, "", "gcsgrep: la ubicación debe comenzar con gs://\n")`
+
+### FR-14 · Con `-c`, un fallo de listado antes del primer objeto termina con 2 y stdout vacío
+
+- **Dado** un bucket cuyo listado falla de entrada con `RuntimeError("404")`
+- **Cuando** se ejecuta `gcsgrep -c timeout gs://logs/app/`
+- **Entonces** stdout queda vacío, stderr informa el fallo y el exit code es 2
+- **VC-FR-14** · `run(["-c", "timeout", "gs://logs/app/"], list_error=RuntimeError("404"))` → `(2, "", "gcsgrep: no se pudo enumerar gs://logs/app/: 404\n")`
+
+### FR-15 · El README documenta el modo conteo
+
+- **Dado** `README.md` con la sección "## Uso" (`README.md:35`)
+- **Cuando** se lee esa sección
+- **Entonces** la línea de uso incluye `[-c]`, el texto nombra la forma larga `--count` y hay un ejemplo con salida `gs://logs/app/server.log:3`
+- **VC-FR-15** · `grep -qF 'gcsgrep [-i] [-n] [-c] "patrón literal" gs://bucket/prefijo/' README.md && grep -qF -- '--count' README.md && grep -qF 'gs://logs/app/server.log:3' README.md` → exit 0
 
 ## Decisiones
 
 | ID | Decisión | Alternativa descartada | Fundamento en el código base |
 |---|---|---|---|
-| D-1 | Formato `gs://bucket/objeto:N`, una línea por objeto | `N gs://…` o columnas separadas por tab | `src/gcsgrep/cli.py:65` la salida existente ya es `uri:` + dato con `:` como separador; un script que corta por `:` sigue funcionando |
-| D-2 | No imprimir objetos con conteo 0 | Imprimir `uri:0` como `grep -c` con varios archivos | `src/gcsgrep/cli.py:96` y `tests/test_gcsgrep.py:291-295` fijan que sin coincidencias stdout queda vacío con exit 1; y `src/gcsgrep/cli.py:32` admite 1.000 objetos por defecto, que serían 1.000 líneas de ceros |
-| D-3 | Con `-c`, `-n` se acepta y se ignora | Rechazar `-c -n` como flags incompatibles (exit 2 de argparse) | `src/gcsgrep/gcs.py:107` el número de línea solo existe por cada línea emitida; en modo conteo no hay línea a la cual ponérselo, y rechazarlo rompería alias tipo `gcsgrep -n` |
-| D-4 | `scan` avisa el conteo con un callback `on_count` al terminar cada objeto completo | Contar en `cli.py` agrupando las llamadas a `on_match` por URI | `src/gcsgrep/gcs.py:165-170` el error de un objeto se detecta después de haber emitido sus líneas previas (`src/gcsgrep/gcs.py:68-69`); las líneas se emiten a medida que se leen (`src/gcsgrep/gcs.py:105-107`), así que desde `cli.py` no se distingue un objeto completo de uno que falló, y se imprimiría un conteo parcial |
-| D-5 | El conteo reutiliza `find_matches` y cuenta lo que produce | Una función nueva con `str.count` | `src/gcsgrep/matcher.py:9` decide por línea con `needle in haystack`; reutilizarlo garantiza que `-c` cuente exactamente las líneas que sin `-c` se imprimen, incluida la regla de `-i` (`src/gcsgrep/matcher.py:6-8`) |
-| D-6 | Un objeto que falla no imprime conteo | Imprimir el conteo parcial de las líneas leídas antes del error | `tests/test_gcsgrep.py:265-272` muestra que la base emite líneas previas al error; un conteo parcial en stdout sería indistinguible de uno completo, mientras que el error ya queda en stderr (`src/gcsgrep/cli.py:69-70`) y el exit 2 (`src/gcsgrep/cli.py:94-95`) |
-| D-7 | El conteo de cada objeto se imprime apenas termina ese objeto | Acumular los conteos e imprimirlos al final de la búsqueda | `src/gcsgrep/gcs.py:139-148` el límite corta antes de abrir el objeto siguiente, y `tests/test_gcsgrep.py:484-493` exige conservar lo ya emitido; imprimir al final perdería los conteos si se levanta `CostLimitReached` |
+| D-1 | Solo se imprime conteo para objetos con al menos una línea coincidente. | Imprimir `<uri>:0` para cada objeto inspeccionado, como `grep -c` con varios archivos. | `src/gcsgrep/gcs.py:105-107` solo invoca `on_match` por línea coincidente y `scan` no tiene callback de objeto terminado; además un objeto vacío o sin coincidencias hoy no produce salida (`tests/test_gcsgrep.py:196-203`). |
+| D-2 | El conteo se implementa en `cli.py`, dentro del callback `emit_match`, sin cambiar la firma de `scan`. | Agregar un parámetro `count` a `scan` / `_scan_blob`. | `src/gcsgrep/gcs.py:151-154` arma la URI completa del objeto y se la pasa a `on_match` en cada línea coincidente, que es la clave del conteo; `src/gcsgrep/cli.py:63-67` es el único lugar que imprime a stdout, así que decide qué se imprime. |
+| D-3 | Los conteos se acumulan en un diccionario con orden de inserción y se imprimen en el orden del listado cuando `scan` vuelve, y también antes del mensaje de error cuando `scan` lanza `CostLimitReached` o `GcsGrepError` (FR-9, FR-12). | Imprimir cada conteo apenas se ve el primer match del objeto siguiente; o descartar los conteos si `scan` lanza. | `src/gcsgrep/gcs.py:137` recorre los objetos en el orden del listado, uno por vez, y `tests/test_gcsgrep.py:432` exige que la salida siga ese orden; en modo normal las líneas de los objetos ya escaneados quedan en stdout aunque después `scan` lance (`tests/test_gcsgrep.py:484-493`, `src/gcsgrep/cli.py:87-92`), y el modo conteo conserva esa información. |
+| D-4 | Un objeto fallido no imprime conteo, aunque haya tenido líneas coincidentes antes del error. | Imprimir el conteo parcial, como el modo normal imprime las líneas previas al error. | `src/gcsgrep/gcs.py:165-170` llama a `on_error` con la misma URI que usó `on_match` (`gcs.py:152`) después de emitir las líneas previas (`gcs.py:79-80` y `gcs.py:105-107`); la CLI puede descartar esa entrada, y un número parcial no se distingue de uno completo, a diferencia de las líneas parciales del modo normal. |
+| D-5 | Se cuentan líneas coincidentes, no apariciones del patrón. | Contar todas las apariciones dentro de cada línea. | `src/gcsgrep/matcher.py:4-10` produce un único `(número, línea)` por línea que contiene el patrón, sin posición ni cantidad de apariciones. |
+| D-6 | `-n` junto a `-c` se acepta y no cambia la salida. | Rechazar la combinación con exit 2 (grupo mutuamente excluyente de argparse). | `src/gcsgrep/cli.py:28` define `-n` como `store_true` independiente y `src/gcsgrep/gcs.py:107` solo usa el número de línea como argumento de `on_match`, que en modo conteo se ignora. |
+| D-7 | Formato `<uri>:<conteo>`. | Formatos como `<conteo> <uri>` o una tabla. | `src/gcsgrep/cli.py:67` ya usa `<uri>:<texto>` con `:` como separador, así que el modo conteo conserva la misma forma de línea. |
+| D-8 | Los exit codes no cambian: 0 si algún objeto tuvo conteo, 1 si ninguno, 2 si hubo objeto fallido, límite, URI inválido o fallo de listado. | Exit 0 siempre que el escaneo termine sin error, aunque no haya coincidencias. | `src/gcsgrep/cli.py:87-96` deriva el exit code de `result.matched` y `result.had_errors`, que `scan` calcula igual con o sin `-c` (`gcs.py:164-166`). |
 
 ## Trazabilidad
-
-Salida de `check_spec.py`: OK — 12 requerimientos, 12 VCs.
 
 | Requerimiento | VC |
 |---|---|
 | INV-1 | VC-INV-1 |
 | INV-2 | VC-INV-2 |
 | INV-3 | VC-INV-3 |
+| INV-4 | VC-INV-4 |
+| INV-5 | VC-INV-5 |
 | FR-1 | VC-FR-1 |
 | FR-2 | VC-FR-2 |
 | FR-3 | VC-FR-3 |
@@ -163,4 +212,10 @@ Salida de `check_spec.py`: OK — 12 requerimientos, 12 VCs.
 | FR-6 | VC-FR-6 |
 | FR-7 | VC-FR-7 |
 | FR-8 | VC-FR-8 |
-| NFR-1 | VC-NFR-1 |
+| FR-9 | VC-FR-9 |
+| FR-10 | VC-FR-10 |
+| FR-11 | VC-FR-11 |
+| FR-12 | VC-FR-12 |
+| FR-13 | VC-FR-13 |
+| FR-14 | VC-FR-14 |
+| FR-15 | VC-FR-15 |

@@ -8,7 +8,7 @@ TP1 y del TP2:
 - **TP1:** el VC-23 no tenía los datos necesarios para dar su resultado, y la spec usaba "trozo" y "tramo" para lo mismo.
 - **TP1 y TP2:** alcance futuro y plan de iteraciones mezclados dentro de la spec.
 
-**Agente declarado:** Claude Code (probado con la 2.1.292). El toolkit vive en
+**Agente declarado:** Claude Code (probado con la 2.1.292 y la 2.1.294). El toolkit vive en
 [`TP3 Skills & Agents/.claude/`](../.claude/). **El proyecto es la carpeta
 `TP3 Skills & Agents/`**: Claude Code carga skills, subagents y hooks del `.claude/` de la
 carpeta donde abrís la sesión, así que hay que correr `claude` desde ahí. El código que
@@ -28,7 +28,7 @@ Todas las rutas de este README son relativas a `TP3 Skills & Agents/`.
 ### Por qué cada pieza está en ese recurso
 
 - **Skill:** especificar es un flujo que repetimos en el TP1 y el TP2, y solo hace falta cuando aparece esa situación. Por eso carga con la `description` y no ocupa contexto en cada sesión. Lo determinístico (que cada FR tenga su VC, que cada decisión tenga ancla, la tabla de trazabilidad) lo hace `check_spec.py`, no el modelo.
-- **Subagent:** su valor es la **independencia**. Si la sesión que escribió la spec también la revisa, hereda sus supuestos. Además, verificar anclas es trabajo ruidoso. En la evidencia 01, el revisor hizo 8 llamadas a herramientas y usó 34.816 tokens en su ventana, y la sesión principal recibió solo el informe (unos 7.500 caracteres). Lleva `tools: Read, Grep, Glob` para que el "no edites" lo garantice la configuración y no solo el brief. No lleva `Bash`, y por eso no ejecuta los VCs: verifica leyendo.
+- **Subagent:** su valor es la **independencia**. Si la sesión que escribió la spec también la revisa, hereda sus supuestos. Además, verificar anclas es trabajo ruidoso. En la evidencia 01, el revisor corrió tres veces, con 8, 10 y 11 llamadas a herramientas y entre 46.179 y 70.194 tokens en su ventana. La sesión principal recibió solo cada informe. Lleva `tools: Read, Grep, Glob` para que el "no edites" lo garantice la configuración y no solo el brief. No lleva `Bash`, y por eso no ejecuta los VCs: verifica leyendo.
 - **Hook:** el skill pide la cobertura de VCs y el revisor la revisa. El hook bloquea los commits que detecta si las specs examinadas no pasan el checker, incluso cuando una copia de trabajo corregida oculta una versión staged inválida.
 
 ### Cómo componen
@@ -111,13 +111,14 @@ la misma estructura dentro de la carpeta donde se abre la sesión:
 
 **Probado en:** Windows 11 Pro, Git Bash 5.2.37 y Python 3.14 (vía `py`). En Linux y macOS
 tendría que bastar con `python3`. La corrección de validación del índice se probó en
-macOS con Bash 3.2 y Python 3.14 mediante las 12 regresiones de evidencia 08;
-esa corrección aún no se volvió a ejecutar dentro de Claude Code en Windows.
-La corrección de comandos se verificó con 23 tests en macOS (evidencia 09).
-Incluyen eventos etiquetados PowerShell alimentados por stdin al hook; no prueban
-una sesión nativa de PowerShell ni Claude Code en Windows.
-La corrección del checker se probó junto con las anteriores mediante 41 tests
-en macOS (evidencia 10); no se volvió a ejecutar el flujo del skill/revisor en Claude.
+macOS con Bash 3.2 y Python 3.14 mediante las 12 regresiones de evidencia 08.
+La corrección de comandos se verificó con 23 tests en macOS (evidencia 09), y la del
+checker junto con las anteriores mediante 41 tests en macOS (evidencia 10).
+Las sesiones 01, 05 y 06 se volvieron a correr en Claude Code 2.1.294 sobre Windows
+con las piezas de `4de0e91`, es decir, con todas esas correcciones.
+En Windows, los tests de `tarea/tests` necesitan que `bash` resuelva al de Git for
+Windows: si WSL está instalado, Python encuentra antes `C:\Windows\System32\bash.exe`
+y las regresiones del hook fallan por el entorno, no por el hook.
 
 **Bit de ejecución:** en Windows git no lo registra solo. Al commitear el toolkit, corré
 desde la raíz del repo:
@@ -192,32 +193,32 @@ stageá la eliminación con `git add -u`. El hook solo lee: nunca cambia el índ
 Las sesiones 01–06 usan `claude -p --output-format stream-json --verbose`, abiertas
 desde `TP3 Skills & Agents/`. El JSONL crudo está en [`evidencia/raw/`](evidencia/raw/), y
 la transcripción legible se generó con [`evidencia/transcribir.py`](evidencia/transcribir.py).
-Ninguna sesión commiteó en este repo. El bloqueo y el commit que pasa (05–07) corrieron en
-un **clon descartable** del repo con el toolkit copiado.
+Ninguna sesión commiteó en este repo. Las sesiones 01, 05 y 06 y la reproducción 07 corrieron en
+un **clon descartable** del repo.
 
 | # | Qué muestra | Archivo |
 |---|---|---|
-| 01 | **Skill disparando solo** con un pedido que no lo nombra. Lee el código de gcsgrep, escribe [`evidencia/specs/gcsgrep-count.md`](evidencia/specs/gcsgrep-count.md), corre `check_spec.py` y **lanza `spec-reviewer`**. El revisor devuelve `## Veredicto: READY` con 5 hallazgos `MENOR` y las anclas verificadas, después de 8 llamadas a herramientas dentro del subagent. La sesión principal corrige los menores y vuelve a chequear. | [`01-skill-y-subagent.md`](evidencia/01-skill-y-subagent.md) |
+| 01 | **Skill disparando solo** con un pedido que no lo nombra. Lee el código de gcsgrep, escribe [`evidencia/specs/gcsgrep-count.md`](evidencia/specs/gcsgrep-count.md), corre `check_spec.py` y **lanza `spec-reviewer`**. Cada informe trae la tabla C1–C5 del brief actual. Primera vuelta: `NEEDS WORK` con 4 `BLOQUEANTE` (C2–C5). La sesión corrige, vuelve a chequear y relanza el revisor dos veces. La tercera revisión sigue en `NEEDS WORK` con un bloqueante de C5 (INV-2 no detecta un test existente neutralizado agregando líneas). Agotadas las dos vueltas, el skill informa `NEEDS WORK` y lo pendiente, sin declarar lista la spec. | [`01-skill-y-subagent.md`](evidencia/01-skill-y-subagent.md) |
 | 02 | Segunda frase que dispara el skill (`→ Skill write-spec-brownfield` como primera acción). Cortada a 3 turnos. | [`02-trigger-positivo.md`](evidencia/02-trigger-positivo.md) |
 | 03 | Frase parecida que **no** tiene que disparar ("revisá la spec…"): el skill no carga y la sesión se pone a leer la spec y el código. Cortada a 3 turnos. | [`03-trigger-negativo-revisar.md`](evidencia/03-trigger-negativo-revisar.md) |
 | 04 | Pregunta sobre una spec ("¿qué dice la spec del TP1 sobre los exit codes?"): el skill no carga. | [`04-trigger-negativo-pregunta.md`](evidencia/04-trigger-negativo-pregunta.md) |
-| 05 | **El hook bloquea un commit.** En la spec staged faltaba `VC-FR-3` y D-2 se fundaba en "lo decidimos así en el equipo". El agente intenta `git commit`, recibe `exit 2` con el stderr y no lo esquiva: explica las dos líneas y pide confirmación antes de inventar el fundamento. `git log` sigue en `b28ad1f`. | [`05-hook-bloquea.md`](evidencia/05-hook-bloquea.md) · [`raw/05-git-log.txt`](evidencia/raw/05-git-log.txt) |
-| 06 | **El agente corrige con el stderr y el commit pasa.** Es la misma sesión retomada: agrega el VC, ancla D-2 a `src/gcsgrep/cli.py:96`, `check_spec.py` da OK, vuelve a commitear y el hook deja pasar el commit (`b4c1ad5`). | [`06-hook-corrige-y-pasa.md`](evidencia/06-hook-corrige-y-pasa.md) · [`raw/05-git-log.txt`](evidencia/raw/05-git-log.txt) |
-| 07 | Reproducción del §7 alimentando el hook por stdin. Condición mala: `exit 2` en las cinco variantes de commit y con PowerShell. Comandos que no son commit: `exit 0`. Evento malformado: `exit 2`. Condición buena: `exit 0`. | [`07-hook-reproduccion.txt`](evidencia/07-hook-reproduccion.txt) |
+| 05 | **El hook bloquea un commit.** En la spec staged faltaba `VC-FR-3` y D-2 se fundaba en "lo decidimos así en el equipo". El agente intenta `git commit … && git log …` y el hook lo veta por comando compuesto. Lo separa, intenta `git commit` solo y recibe el segundo veto, con las líneas `[staged]` y `[copia de trabajo]`. No lo esquiva: revisa el diff, explica las dos líneas y pregunta cómo seguir. `git log` sigue en `4a4ede9`. | [`05-hook-bloquea.md`](evidencia/05-hook-bloquea.md) · [`raw/05-git-log.txt`](evidencia/raw/05-git-log.txt) |
+| 06 | **El agente corrige con el stderr y el commit pasa.** Es la misma sesión retomada: vuelve a agregar `VC-FR-3`, ancla D-2 a `src/gcsgrep/gcs.py:151-154` y `src/gcsgrep/cli.py:63-67` después de leerlos, `check_spec.py` da OK, hace `git add` y `git commit` en llamadas separadas, y el hook deja pasar el commit (`4cec3a5`). | [`06-hook-corrige-y-pasa.md`](evidencia/06-hook-corrige-y-pasa.md) · [`raw/05-git-log.txt`](evidencia/raw/05-git-log.txt) |
+| 07 | Reproducción del §7 alimentando el hook por stdin, con el hook de `4de0e91`. Condición mala: `exit 2` en cuatro variantes de commit y con PowerShell. Commits compuestos (`cd . &&`, `git add . &&`): `exit 2`. Comandos que no son commit: `exit 0`. Evento malformado: `exit 2`. Spec inválida staged con la copia corregida: `exit 2`. Condición buena: `exit 0`. | [`07-hook-reproduccion.txt`](evidencia/07-hook-reproduccion.txt) |
 | 08 | Regresiones de la corrección del índice: bloquea specs staged inválidas aunque se corrijan o borren del disco; permite volver a stagear la corrección y eliminar una spec del índice; mantiene la política conservadora para `-a`, rutas y eventos PowerShell. Cada caso usa un repo temporal y comprueba que el hook no altere el índice. Es ejecución directa del hook, sin una sesión nueva de Claude. | [`08-hook-indice.txt`](evidencia/08-hook-indice.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 09 | Regresiones de los comandos, incluidas las 12 del índice: rutas `-C` entre comillas, commits compuestos con specs nuevas, destino externo, menciones que no deben disparar y mensajes con operadores como texto. Guarda la salida real y hashes de los archivos probados; cada caso comprueba que el hook no cambie el árbol del índice. | [`09-hook-comandos.txt`](evidencia/09-hook-comandos.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 10 | Corrección del checker: 16 tests de campos FR/NFR y VCs, más las 23 regresiones anteriores del hook y 2 nuevas de bloqueo estructural en índice/copia de trabajo. Incluye salida real, hashes y comprobación directa de la spec adaptada. | [`10-checker-estructura.txt`](evidencia/10-checker-estructura.txt) · [`tests/test_check_spec.py`](tests/test_check_spec.py) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 11 | Revisión manual del criterio de severidad y veredicto: casos de los cinco controles, falta de evidencia, detalles editoriales e instrucciones incrustadas; comprueba consistencia entre brief, skill y README. No es una ejecución nueva del subagent. | [`11-reviewer-criterios.md`](evidencia/11-reviewer-criterios.md) |
 
-Las sesiones 01–04 corrieron antes de los dos arreglos de arriba. Ninguna intentó un commit,
-y la spec de 01 adaptada a los campos explícitos de NFR da OK con el checker actual.
-Las evidencias 05–07 también son anteriores a la corrección del índice; se conservan
-como historial. La evidencia 08 verifica la corrección del índice y la 09 ambas
-correcciones en sus versiones de entonces. Las evidencias 08–10 son tests directos,
-no sesiones de Claude Code; la 10 verifica las tres correcciones juntas.
-La evidencia 11 documenta la corrección 4 mediante revisión manual de las instrucciones;
-las sesiones históricas del revisor conservan el brief y los veredictos de su corrida.
-Todavía no hay una corrida nueva de Claude con el criterio C1–C5.
+Las sesiones 01, 05 y 06 y la reproducción 07 se volvieron a correr el 2026-10-08 con las
+piezas de `4de0e91`, que incluyen las correcciones del índice, de los comandos, del checker
+y del criterio C1–C5 del revisor. Corrieron en Claude Code 2.1.294, en un clon descartable.
+La 01 partió sin spec. Su resultado se commiteó en el clon como base (`4a4ede9`), y para
+la 05 se stageó esa spec sin `VC-FR-3` y con D-2 sin ancla.
+Las sesiones 02–04 son anteriores a esas correcciones y no intentan commits: solo prueban
+el trigger, que depende de la `description`, sin cambios desde entonces.
+Las evidencias 08–10 son tests directos, no sesiones de Claude Code. La 11 documenta el
+criterio de veredicto por revisión manual, y la 01 lo muestra aplicado en una corrida real.
 
 ### Casos de trigger del skill (como VCs)
 

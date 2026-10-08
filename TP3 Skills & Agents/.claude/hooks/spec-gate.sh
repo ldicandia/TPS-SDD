@@ -5,12 +5,9 @@ cd "${CLAUDE_PROJECT_DIR:-.}" || { echo "spec-gate: no pude entrar a CLAUDE_PROJ
 CHECK=.claude/skills/write-spec-brownfield/scripts/check_spec.py
 PY=""; for c in python3 python "py -3"; do $c -c 'import sys' >/dev/null 2>&1 && { PY=$c; break; }; done
 [ -n "$PY" ] || { echo "spec-gate: no encontré Python 3 (python3, python o py). Instalalo: sin él no puedo chequear las specs y bloqueo el commit." >&2; exit 2; }
-CMD=$($PY -c 'import json,sys; sys.stdout.reconfigure(encoding="utf-8"); print(json.load(sys.stdin.buffer)["tool_input"]["command"])' 2>/dev/null) \
-  || { echo "spec-gate: el evento no trae tool_input.command legible; bloqueo por las dudas." >&2; exit 2; }
-# El matcher filtra por tool (Bash|PowerShell); acá se decide por contenido: ¿es un git commit?
-# Cubre `git commit -am`, `git -C . commit`, `cd x && git commit`, `git --no-pager commit`.
-printf '%s\n' "$CMD" | grep -Eq '(^|[;&|(]|\s)git(\s+-[Cc]\s+\S+|\s+--\S+)*\s+commit(\s|$)' || exit 0
-git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+# Respeta las comillas de -C y veta operaciones previas al commit que cambiarían el índice.
+KIND=$($PY .claude/hooks/commit_command.py) || exit 2
+[ "$KIND" = commit ] || exit 0
 PREFIX=$(git rev-parse --show-prefix) || { echo "spec-gate: no pude resolver la ruta del proyecto; bloqueo el commit." >&2; exit 2; }
 FALLAS=""
 FILES=()

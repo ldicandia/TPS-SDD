@@ -1,0 +1,61 @@
+# Corrección 2 — detección de comandos de spec-gate, 2026-10-07
+# Ejecución directa del hook; no es una sesión de Claude Code.
+# Cada test crea un repo temporal, verifica que el árbol del índice no cambie y elimina el repo.
+# Plataforma: Darwin 25.6.0
+# Python: 3.14.7
+# Bash: GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+# Base Git: 07a348b2be64e62277737c0b65926ac75b46dc38 + cambios locales de la corrección 2
+
+# SHA-256 de los archivos probados
+26679b41690d98fff50afacfe580489ed1573e598ec3557c4e6bbb81cddca9c1  .claude/hooks/spec-gate.sh
+e575129683ab86fe2786999298ed72f31a0e6423ca0308bb4023dfc063e2af07  .claude/hooks/commit_command.py
+f49c45d330c8bc1d8d6e2c1609e57bd9a17e58efa30844bedc7db3960ae63075  .claude/skills/write-spec-brownfield/scripts/check_spec.py
+322d2d999cb1253e28e37257f9c728f6a18103674513932672200d8dd1bf267d  tarea/tests/test_spec_gate.py
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tarea/tests -v
+test_add_and_commit_is_also_rejected_with_valid_spec (test_spec_gate.SpecGateIndexTests.test_add_and_commit_is_also_rejected_with_valid_spec) ... ok
+test_add_and_commit_with_new_invalid_spec_blocks_before_add (test_spec_gate.SpecGateIndexTests.test_add_and_commit_with_new_invalid_spec_blocks_before_add) ... ok
+test_commit_a_checks_both_versions (test_spec_gate.SpecGateIndexTests.test_commit_a_checks_both_versions) ... ok
+test_commit_with_path_checks_both_versions (test_spec_gate.SpecGateIndexTests.test_commit_with_path_checks_both_versions) ... ok
+test_compound_commits_require_separate_calls (test_spec_gate.SpecGateIndexTests.test_compound_commits_require_separate_calls) ... ok
+test_invalid_index_stays_blocked_after_worktree_deletion (test_spec_gate.SpecGateIndexTests.test_invalid_index_stays_blocked_after_worktree_deletion) ... ok
+test_invalid_index_stays_blocked_after_worktree_fix (test_spec_gate.SpecGateIndexTests.test_invalid_index_stays_blocked_after_worktree_fix) ... ok
+test_mentions_of_commit_are_not_git_commits (test_spec_gate.SpecGateIndexTests.test_mentions_of_commit_are_not_git_commits) ... ok
+test_new_invalid_staged_spec_blocks_after_worktree_fix (test_spec_gate.SpecGateIndexTests.test_new_invalid_staged_spec_blocks_after_worktree_fix) ... ok
+test_non_commit_passes_with_invalid_index (test_spec_gate.SpecGateIndexTests.test_non_commit_passes_with_invalid_index) ... ok
+test_other_repo_and_event_cwd_are_rejected (test_spec_gate.SpecGateIndexTests.test_other_repo_and_event_cwd_are_rejected) ... ok
+test_overrides_and_dynamic_c_paths_are_rejected (test_spec_gate.SpecGateIndexTests.test_overrides_and_dynamic_c_paths_are_rejected) ... ok
+test_powershell_event_validates_index (test_spec_gate.SpecGateIndexTests.test_powershell_event_validates_index) ... ok
+test_quoted_c_powershell_blocks_invalid_index (test_spec_gate.SpecGateIndexTests.test_quoted_c_powershell_blocks_invalid_index) ... ok
+test_quoted_c_same_repo_passes_valid_spec (test_spec_gate.SpecGateIndexTests.test_quoted_c_same_repo_passes_valid_spec) ... ok
+test_quoted_c_with_spaces_blocks_invalid_index (test_spec_gate.SpecGateIndexTests.test_quoted_c_with_spaces_blocks_invalid_index) ... ok
+test_quoted_message_operators_are_data (test_spec_gate.SpecGateIndexTests.test_quoted_message_operators_are_data) ... ok
+test_restage_fixed_spec_passes (test_spec_gate.SpecGateIndexTests.test_restage_fixed_spec_passes) ... ok
+test_staged_deletion_passes (test_spec_gate.SpecGateIndexTests.test_staged_deletion_passes) ... ok
+test_staged_deletion_with_invalid_recreated_file_blocks (test_spec_gate.SpecGateIndexTests.test_staged_deletion_with_invalid_recreated_file_blocks) ... ok
+test_unbalanced_quotes_are_rejected (test_spec_gate.SpecGateIndexTests.test_unbalanced_quotes_are_rejected) ... ok
+test_valid_index_invalid_worktree_blocks_conservatively (test_spec_gate.SpecGateIndexTests.test_valid_index_invalid_worktree_blocks_conservatively) ... ok
+test_valid_staged_change_passes (test_spec_gate.SpecGateIndexTests.test_valid_staged_change_passes) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 7.561s
+
+OK
+
+exit=0
+
+# Transcripción directa de los dos casos del problema 2
+# Los comandos se envían en el evento JSON, no se ejecutan.
+
+$ evento Bash: git -C "/var/folders/9j/f_ny04z976l_c581z194cdq80000gn/T/spec-gate-test-78opsilo/TP3 Skills & Agents" commit -m prueba
+spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
+[staged] specs/caso con espacios.md:73: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+Se validan por separado el contenido staged y la copia de trabajo. Corregir o borrar el archivo del disco no cambia lo que ya está staged.
+Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
+Para ver la spec entera: python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
+exit=2
+
+$ evento Bash: git add specs/nueva.md && git commit -m prueba
+spec-gate: commit bloqueado: separá el commit de las demás operaciones: ejecutá git add y después git commit en llamadas distintas; no uses &&, ;, pipes, redirecciones ni cambios de directorio en la misma llamada.
+exit=2
+La spec nueva sigue sin stagear; el evento fue vetado antes del add.

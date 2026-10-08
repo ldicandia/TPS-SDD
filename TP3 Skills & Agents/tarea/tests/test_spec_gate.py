@@ -1,4 +1,4 @@
-"""Regresiones del índice de spec-gate; solo usa repositorios temporales.
+"""Regresiones del índice y de los comandos de spec-gate en repos temporales.
 
 Desde TP3 Skills & Agents/: python3 -m unittest discover -s tarea/tests -v
 """
@@ -55,8 +55,9 @@ class SpecGateIndexTests(unittest.TestCase):
         self.spec.write_text(INVALID, encoding="utf-8")
         self.git("add", "specs/caso con espacios.md")
 
-    def gate(self, command="git commit -m prueba", tool="Bash"):
+    def gate(self, command="git commit -m prueba", tool="Bash", cwd=None):
         event = {"tool_name": tool, "hook_event_name": "PreToolUse",
+                 "cwd": str(cwd or self.project),
                  "tool_input": {"command": command}}
         before = self.git("write-tree")
         result = subprocess.run(
@@ -140,6 +141,107 @@ class SpecGateIndexTests(unittest.TestCase):
         code, error = self.gate(tool="PowerShell")
         self.assertEqual(code, 2, error)
         self.assertIn("[staged]", error)
+
+    def test_quoted_c_with_spaces_blocks_invalid_index(self):
+        self.stage_invalid()
+        for quote in ('"', "'"):
+            with self.subTest(quote=quote):
+                self.assert_blocked("git -C " + quote + str(self.project) + quote + " commit -m prueba")
+
+    def test_quoted_c_same_repo_passes_valid_spec(self):
+        for command in (
+            'git -C "' + str(self.project) + '" commit -m prueba',
+            'git -C "' + str(self.repo) + '" -C "TP3 Skills & Agents" commit -m prueba',
+            'git -C "" --no-pager commit -m prueba',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.gate(command), (0, ""))
+
+    def test_quoted_c_powershell_blocks_invalid_index(self):
+        self.stage_invalid()
+        command = 'git -C "' + str(self.project) + '" commit -m prueba'
+        code, error = self.gate(command, tool="PowerShell")
+        self.assertEqual(code, 2, error)
+        self.assertIn("[staged]", error)
+
+    def test_add_and_commit_with_new_invalid_spec_blocks_before_add(self):
+        new = self.project / "specs/nueva.md"
+        new.write_text(INVALID, encoding="utf-8")
+        code, error = self.gate("git add specs/nueva.md && git commit -m prueba")
+        self.assertEqual(code, 2, error)
+        self.assertIn("separá el commit", error)
+        self.assertEqual(self.git("ls-files", "--", "specs/nueva.md"), b"")
+        self.assertEqual(new.read_text(encoding="utf-8"), INVALID)
+
+    def test_add_and_commit_is_also_rejected_with_valid_spec(self):
+        new = self.project / "specs/nueva.md"
+        new.write_text(VALID, encoding="utf-8")
+        code, error = self.gate("git add specs/nueva.md && git commit -m prueba")
+        self.assertEqual(code, 2, error)
+        self.assertIn("separá el commit", error)
+
+    def test_compound_commits_require_separate_calls(self):
+        for command in (
+            "git add .; git commit -m prueba",
+            "git add .\ngit commit -m prueba",
+            "cd . && git commit -m prueba",
+            "git commit -m prueba && git status",
+            "(git commit -m prueba)",
+        ):
+            with self.subTest(command=command):
+                code, error = self.gate(command)
+                self.assertEqual(code, 2, error)
+                self.assertIn("separá el commit", error)
+
+    def test_other_repo_and_event_cwd_are_rejected(self):
+        other = self.repo / "otro repo"
+        self.git("init", "-q", str(other))
+        for command, cwd in (
+            ('git -C "' + str(other) + '" commit -m prueba', None),
+            ("git commit -m prueba", other),
+        ):
+            with self.subTest(command=command, cwd=cwd):
+                code, error = self.gate(command, cwd=cwd)
+                self.assertEqual(code, 2, error)
+                self.assertIn("otro repositorio", error)
+
+    def test_mentions_of_commit_are_not_git_commits(self):
+        self.stage_invalid()
+        for command in (
+            "git log --grep commit", "echo git commit", 'echo "git commit"',
+            'git status && echo "git commit"', "git status # git commit -m prueba",
+            "git status # nota; git commit -m prueba",
+            'git commit-not-a-command',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.gate(command), (0, ""))
+
+    def test_quoted_message_operators_are_data(self):
+        for command in (
+            'git commit -m "&&"', "git commit -m ';'", 'git commit -m "()"',
+            'git commit -m "git add . && git commit"', "git commit -m prueba\n",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.gate(command), (0, ""))
+
+    def test_overrides_and_dynamic_c_paths_are_rejected(self):
+        for command in (
+            "git -c user.name=Prueba commit -m prueba",
+            "git --git-dir=otro commit -m prueba",
+            "GIT_INDEX_FILE=otro git commit -m prueba",
+            'git -C "$PWD" commit -m prueba',
+            'git "$subcommand" -m prueba',
+            'git co`mmit -m prueba',
+        ):
+            with self.subTest(command=command):
+                code, error = self.gate(command)
+                self.assertEqual(code, 2, error)
+                self.assertIn("commit bloqueado", error)
+
+    def test_unbalanced_quotes_are_rejected(self):
+        code, error = self.gate('git -C "ruta sin cierre commit')
+        self.assertEqual(code, 2, error)
+        self.assertIn("commit bloqueado", error)
 
 
 if __name__ == "__main__":

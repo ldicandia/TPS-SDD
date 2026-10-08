@@ -32,3 +32,5 @@
 **Fin:** success · turnos 2 · 7 s
 
 **Herramientas usadas:** sesión principal 1 · dentro del subagent 0
+
+**Eventos del JSONL no transcriptos** (ruido de runtime, sin contenido del modelo): rate_limit_event ×2, system:hook_response ×5, system:hook_started ×5

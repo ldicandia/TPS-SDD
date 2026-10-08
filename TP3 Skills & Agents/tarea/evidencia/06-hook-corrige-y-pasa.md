@@ -81,31 +81,31 @@ The file C:\Users\Lucas Di Candia\AppData\Local\Temp\claude\c--Users-Lucas-Di-Ca
 `← Bash`
 
 ```text
-tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
-
-| Requerimiento | VC |
-|---|---|
-| INV-1 | VC-INV-1 |
-| INV-2 | VC-INV-2 |
-| INV-3 | VC-INV-3 |
-| INV-4 | VC-INV-4 |
-| INV-5 | VC-INV-5 |
-| FR-1 | VC-FR-1 |
-| FR-2 | VC-FR-2 |
-| FR-3 | VC-FR-3 |
-| FR-4 | VC-FR-4 |
-| FR-5 | VC-FR-5 |
-| FR-6 | VC-FR-6 |
-| FR-7 | VC-FR-7 |
-| FR-8 | VC-FR-8 |
-| FR-9 | VC-FR-9 |
-| FR-10 | VC-FR-10 |
-| FR-11 | VC-FR-11 |
-| FR-12 | VC-FR-12 |
-| FR-13 | VC-FR-13 |
-| FR-14 | VC-FR-14 |
-| FR-15 | VC-FR-15 |
-
+tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
+
+| Requerimiento | VC |
+|---|---|
+| INV-1 | VC-INV-1 |
+| INV-2 | VC-INV-2 |
+| INV-3 | VC-INV-3 |
+| INV-4 | VC-INV-4 |
+| INV-5 | VC-INV-5 |
+| FR-1 | VC-FR-1 |
+| FR-2 | VC-FR-2 |
+| FR-3 | VC-FR-3 |
+| FR-4 | VC-FR-4 |
+| FR-5 | VC-FR-5 |
+| FR-6 | VC-FR-6 |
+| FR-7 | VC-FR-7 |
+| FR-8 | VC-FR-8 |
+| FR-9 | VC-FR-9 |
+| FR-10 | VC-FR-10 |
+| FR-11 | VC-FR-11 |
+| FR-12 | VC-FR-12 |
+| FR-13 | VC-FR-13 |
+| FR-14 | VC-FR-14 |
+| FR-15 | VC-FR-15 |
+
 exit=0
 ```
 
@@ -142,3 +142,5 @@ La versión anterior citaba `gcs.py:154-155`, que estaba corrida una línea: la 
 **Fin:** success · turnos 9 · 34 s
 
 **Herramientas usadas:** sesión principal 8 · dentro del subagent 0
+
+**Eventos del JSONL no transcriptos** (ruido de runtime, sin contenido del modelo): rate_limit_event ×2, system:hook_response ×5, system:hook_started ×5, system:thinking_tokens ×6, system:vcs_state_changed ×1

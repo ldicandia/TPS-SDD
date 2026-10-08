@@ -146,3 +146,5 @@
 **Fin:** error_max_turns · turnos 4 · 28 s
 
 **Herramientas usadas:** sesión principal 6 · dentro del subagent 0
+
+**Eventos del JSONL no transcriptos** (ruido de runtime, sin contenido del modelo): rate_limit_event ×2, system:hook_response ×5, system:hook_started ×5, system:thinking_tokens ×15

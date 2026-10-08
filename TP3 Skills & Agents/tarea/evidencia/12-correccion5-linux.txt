@@ -1,0 +1,198 @@
+# Corrección 5 — huecos del gate y del checker, 2026-10-08
+# Ejecución directa en Linux; no es una sesión de Claude Code.
+# Primera corrida del toolkit en esta plataforma: las anteriores fueron Windows y macOS.
+# Plataforma: Linux 5.15.0-198-generic
+# Python: 3.10.12
+# Bash: GNU bash, version 5.1.16(1)-release (x86_64-pc-linux-gnu)
+# Base Git: ea81441ae2ac3ec9b7236493a85411a364d76a3c + cambios locales de la corrección 5
+
+# SHA-256 de las piezas entregadas (manifiesto vigente: cubre las correcciones 4 y 5)
+da1dd4e42fc0e11b039d8757c0e8ede8b53d80b55f3fc7772f9864e1d52c5c4f  .claude/hooks/spec-gate.sh
+3812c2da08a7c8bbaa5450518c6f489ffd98f9d35c9c180b6b8c2ecde089ecf4  .claude/hooks/commit_command.py
+ae552895d4939ef5c0cacbe0fd64e6f3e5beac4d8a27f2bc690fdc251bec61e6  .claude/settings.json
+b6c2043c7d017053142660b7bc085ef0c8e85ef2658497c1fb6e0caa5f7ed9fa  .claude/skills/write-spec-brownfield/SKILL.md
+85a49dc2fb4d7a6bb716528530e29d06ced23df8bb0a017b4abee25c10009cab  .claude/skills/write-spec-brownfield/plantilla.md
+b52f22dc50dafa6bb7098ace87344d10307193bc8b74fde5aecc60b99993b84d  .claude/skills/write-spec-brownfield/scripts/check_spec.py
+142cbdde8bc815ebd719f582079fa59bacb4b4752d49137fc8219aae800fa75b  .claude/agents/spec-reviewer.md
+499eebe53a3ab971e8724dfc731385f32bdd83405e1149811c3df918f1e612ec  CLAUDE.md
+41922c9e697c7eccacec937680dfe55eea425fa00e3bce1a34e03eb479c4ba27  tarea/tests/fixtures.py
+724004e2c209be79003ecefaa4497b740e69dbb3765710dc454b34de1b3a211f  tarea/tests/test_check_spec.py
+c0557234866292013b62821eed57102d7b62679bf82c7fe72c4e7c65ceec40d3  tarea/tests/test_spec_gate.py
+003e32ee11d9de7c7a307c462a64685cbcb870a17ce4695ddf2fab2723c2e8d1  tarea/evidencia/transcribir.py
+30ccbf1e0ce97bfabaa952f44f13f8d85b8f34ee307fa5c6f59281d642b28ae2  tarea/evidencia/specs/gcsgrep-count.md
+51821dc8725c706a6292c53516fb0c611babe7abfd82055bf156aab70798a6f4  tarea/README.md
+bc8a8cb1cba4d942369057371160231ab2c0b4bb06975e0a950ceaa2ceaebe60  tarea/ENTREGA.md
+
+$ python3 -m unittest discover -s tarea/tests -v
+test_angle_bracket_data_is_not_a_placeholder (test_check_spec.CheckSpecTests) ... ok
+test_api_versions_are_not_future_scope (test_check_spec.CheckSpecTests)
+`v2` como versión de API no es "alcance futuro" (mismo caso que todo/TODO). ... ok
+test_arrow_inside_command_does_not_replace_result_separator (test_check_spec.CheckSpecTests) ... ok
+test_cli_stdin_reports_the_same_structural_error_and_exit_one (test_check_spec.CheckSpecTests) ... ok
+test_decision_anchor_must_look_like_a_source_file (test_check_spec.CheckSpecTests)
+"Lo pide la consigna" no se arregla pegándole cualquier número. ... ok
+test_deferred_scope_inside_a_requirement_is_still_rejected (test_check_spec.CheckSpecTests) ... ok
+test_delivered_spec_passes (test_check_spec.CheckSpecTests)
+La spec que produjo la sesión 01 pasa el checker tal como se entrega. ... ok
+test_duplicate_field_is_rejected (test_check_spec.CheckSpecTests) ... ok
+test_each_given_when_then_must_have_content (test_check_spec.CheckSpecTests) ... ok
+test_each_nfr_field_is_required_and_nonempty (test_check_spec.CheckSpecTests) ... ok
+test_empty_expected_result_is_rejected (test_check_spec.CheckSpecTests) ... ok
+test_fixture_passes_with_complete_trace (test_check_spec.CheckSpecTests) ... ok
+test_given_when_then_mentions_in_prose_are_not_fields (test_check_spec.CheckSpecTests) ... ok
+test_last_scenario_cannot_have_empty_result (test_check_spec.CheckSpecTests) ... ok
+test_literal_arrow_and_explicit_empty_stdout_are_valid (test_check_spec.CheckSpecTests) ... ok
+test_missing_or_empty_input_is_rejected_even_with_output (test_check_spec.CheckSpecTests) ... ok
+test_nfr_is_optional (test_check_spec.CheckSpecTests) ... ok
+test_nfr_metric_must_name_a_measure (test_check_spec.CheckSpecTests) ... ok
+test_real_anchors_are_still_accepted (test_check_spec.CheckSpecTests) ... ok
+test_source_line_numbers_do_not_count_as_threshold_or_load (test_check_spec.CheckSpecTests) ... ok
+test_template_placeholders_are_still_rejected (test_check_spec.CheckSpecTests) ... ok
+test_traceability_section_is_required (test_check_spec.CheckSpecTests) ... ok
+test_unclosed_backticks_are_rejected (test_check_spec.CheckSpecTests) ... ok
+test_vc_without_expected_result_is_rejected_for_all_requirement_types (test_check_spec.CheckSpecTests) ... ok
+test_add_and_commit_is_also_rejected_with_valid_spec (test_spec_gate.SpecGateIndexTests) ... ok
+test_add_and_commit_with_new_invalid_spec_blocks_before_add (test_spec_gate.SpecGateIndexTests) ... ok
+test_commit_a_checks_both_versions (test_spec_gate.SpecGateIndexTests) ... ok
+test_commit_with_path_checks_both_versions (test_spec_gate.SpecGateIndexTests) ... ok
+test_compound_commits_require_separate_calls (test_spec_gate.SpecGateIndexTests) ... ok
+test_empty_then_in_worktree_blocks_valid_index (test_spec_gate.SpecGateIndexTests) ... ok
+test_invalid_index_stays_blocked_after_worktree_deletion (test_spec_gate.SpecGateIndexTests) ... ok
+test_invalid_index_stays_blocked_after_worktree_fix (test_spec_gate.SpecGateIndexTests) ... ok
+test_markdown_outside_specs_is_still_ignored (test_spec_gate.SpecGateIndexTests) ... ok
+test_mentions_of_commit_are_not_git_commits (test_spec_gate.SpecGateIndexTests) ... ok
+test_new_invalid_staged_spec_blocks_after_worktree_fix (test_spec_gate.SpecGateIndexTests) ... ok
+test_non_commit_passes_with_invalid_index (test_spec_gate.SpecGateIndexTests) ... ok
+test_other_repo_and_event_cwd_are_rejected (test_spec_gate.SpecGateIndexTests) ... ok
+test_overrides_and_dynamic_c_paths_are_rejected (test_spec_gate.SpecGateIndexTests) ... ok
+test_powershell_event_validates_index (test_spec_gate.SpecGateIndexTests) ... ok
+test_quoted_c_powershell_blocks_invalid_index (test_spec_gate.SpecGateIndexTests) ... ok
+test_quoted_c_same_repo_passes_valid_spec (test_spec_gate.SpecGateIndexTests) ... ok
+test_quoted_c_with_spaces_blocks_invalid_index (test_spec_gate.SpecGateIndexTests) ... ok
+test_quoted_message_operators_are_data (test_spec_gate.SpecGateIndexTests) ... ok
+test_restage_fixed_spec_passes (test_spec_gate.SpecGateIndexTests) ... ok
+test_specs_in_subdirectories_are_validated (test_spec_gate.SpecGateIndexTests)
+specs/<subcarpeta>/x.md sigue siendo una spec: el gate la mira. ... ok
+test_staged_deletion_passes (test_spec_gate.SpecGateIndexTests) ... ok
+test_staged_deletion_with_invalid_recreated_file_blocks (test_spec_gate.SpecGateIndexTests) ... ok
+test_structural_defects_in_index_stay_blocked_after_worktree_fix (test_spec_gate.SpecGateIndexTests) ... ok
+test_unbalanced_quotes_are_rejected (test_spec_gate.SpecGateIndexTests) ... ok
+test_unparseable_commands_without_commit_are_not_blocked (test_spec_gate.SpecGateIndexTests)
+Un comando raro que no es commit no tiene por qué frenar la sesión. ... ok
+test_valid_index_invalid_worktree_blocks_conservatively (test_spec_gate.SpecGateIndexTests) ... ok
+test_valid_staged_change_passes (test_spec_gate.SpecGateIndexTests) ... ok
+test_wrapped_commits_are_rejected (test_spec_gate.SpecGateIndexTests)
+Prefijos como time/sudo no convierten un commit en otro comando. ... ok
+test_wrappers_without_a_commit_still_pass (test_spec_gate.SpecGateIndexTests) ... ok
+
+----------------------------------------------------------------------
+Ran 54 tests in 4.082s
+
+OK
+
+# Reproducción directa de los casos de la corrección 5
+# Los comandos van dentro del evento JSON; el hook nunca los ejecuta.
+# Cada exit= es el código real devuelto por spec-gate.sh.
+
+## Spec inválida en specs/<subcarpeta>/ — antes pasaba con exit 0
+$ evento Bash: git commit -m x
+spec-gate: commit bloqueado. Estas specs no pasan check_spec.py:
+[staged] specs/2026-10/anidada.md:43: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+[copia de trabajo] specs/2026-10/anidada.md:43: FR-1 no tiene su '- **VC-FR-1** · `comando` → resultado' — un requerimiento sin VC no es verificable
+Se validan por separado el contenido staged y la copia de trabajo. Corregir o borrar el archivo del disco no cambia lo que ya está staged.
+Corregí cada línea (sumá el VC, el fundamento archivo:línea o el porqué que falta), hacé git add y volvé a commitear.
+Para ver la spec entera: python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py <spec>. No lo esquives con otro comando: el commit tiene que llevar specs completas.
+exit=2
+
+## Prefijos que envuelven el commit — antes todos exit 0
+$ evento Bash: time git commit -m x
+spec-gate: commit bloqueado: commit con wrapper, variables de entorno u overrides -c; invocá git commit directamente desde el proyecto.
+exit=2
+$ evento Bash: sudo git commit -m x
+spec-gate: commit bloqueado: commit con wrapper, variables de entorno u overrides -c; invocá git commit directamente desde el proyecto.
+exit=2
+$ evento Bash: nice -n 5 git commit -m x
+spec-gate: commit bloqueado: commit con wrapper, variables de entorno u overrides -c; invocá git commit directamente desde el proyecto.
+exit=2
+$ evento Bash: timeout 5 git commit -m x
+spec-gate: commit bloqueado: commit con wrapper, variables de entorno u overrides -c; invocá git commit directamente desde el proyecto.
+exit=2
+
+## Prefijo sin commit — tiene que seguir pasando
+$ evento Bash: time pytest -q
+exit=0
+$ evento Bash: sudo git status
+exit=0
+
+## Comando benigno que shlex no puede partir — antes 'commit bloqueado: No closing quotation.'
+$ evento Bash: echo no te preocupes, don't panic
+exit=0
+$ evento Bash: awk '{print $1}' archivo
+exit=0
+
+## Comillas sin cerrar que sí mencionan un commit — falla cerrada
+$ evento Bash: git -C "ruta sin cierre commit
+spec-gate: commit bloqueado: no pude separar el comando (¿comillas sin cerrar?); escribí el git commit con comillas balanceadas.
+exit=2
+
+## .md fuera de specs/ — sigue ignorado a propósito
+$ evento Bash: git commit -m x
+exit=0
+
+# Casos del checker (corrección 5). El fixture base es tarea/tests/fixtures.py.
+
+## `v2` de una versión de API — antes se marcaba como alcance futuro
+$ check_spec.py <VC con `--api-version=v2`>
+  caso.md: OK, sin problemas
+exit=0
+$ check_spec.py <prosa con /storage/v2/objects>
+  caso.md: OK, sin problemas
+exit=0
+
+## Alcance futuro de verdad — tiene que seguir fallando
+$ check_spec.py <'queda para v2'>
+  caso.md:47: alcance futuro ('para v2') dentro de un requerimiento — va al plan
+exit=1
+$ check_spec.py <'lo vemos más adelante'>
+  caso.md:47: alcance futuro ('más adelante') dentro de un requerimiento — va al plan
+exit=1
+
+## Fundamento de decisión que no es un archivo — antes pasaba
+$ check_spec.py <'la consigna ... 3.1:20'>
+  caso.md:62: D-1 sin fundamento 'archivo:línea' del código base — 'lo pide la consigna' no fundamenta
+exit=1
+$ check_spec.py <'según el manual v1.2:30'>
+  caso.md:62: D-1 sin fundamento 'archivo:línea' del código base — 'lo pide la consigna' no fundamenta
+exit=1
+
+## Anclas reales — tienen que seguir pasando
+$ check_spec.py <cli.py:96>
+  caso.md: OK, sin problemas
+exit=0
+$ check_spec.py <test_gcsgrep.py:291-295>
+  caso.md: OK, sin problemas
+exit=0
+
+## Datos entre <> — antes 'placeholder sin completar'
+$ check_spec.py <dato <stdin>>
+  caso.md: OK, sin problemas
+exit=0
+$ check_spec.py <dato <application/json>>
+  caso.md: OK, sin problemas
+exit=0
+$ check_spec.py <dato <soporte@itba.edu.ar>>
+  caso.md: OK, sin problemas
+exit=0
+$ check_spec.py <placeholder real>
+  caso.md:45: placeholder sin completar '<poner acá el estado inicial>'
+exit=1
+
+## Sección Trazabilidad obligatoria
+$ check_spec.py <spec sin '## Trazabilidad'>
+  caso.md:1: falta la sección '## Trazabilidad' — copiala de plantilla.md
+exit=1
+
+## La spec entregada pasa tal como se entrega
+$ check_spec.py tarea/evidencia/specs/gcsgrep-count.md
+  tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
+exit=0

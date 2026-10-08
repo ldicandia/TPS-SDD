@@ -26,7 +26,7 @@ drwxr-xr-x 1 Lucas Di Candia 197121     0 Oct  8 09:05 ..
 -rw-r--r-- 1 Lucas Di Candia 197121 13695 Oct  8 09:05 gcsgrep-base-context.md
 -rw-r--r-- 1 Lucas Di Candia 197121 13037 Oct  8 09:05 gcsgrep-cobertura-vc.md
 -rw-r--r-- 1 Lucas Di Candia 197121  3558 Oct  8 09:05 gcsgrep-plan.m
-… [3337 caracteres más]
+… [3276 caracteres más]
 ```
 
 `→ Bash` {"command": "cd \"../TP1 Greenfield/Tarea\" && cat -n src/gcsgrep/cli.py src/gcsgrep/matcher.py src/gcsgrep/__main__.py pyproject.toml README.md; wc -l src/gcsgrep/gcs.py tests/test_gcsgrep.py tests/integration/test_emulator.py"}
@@ -34,25 +34,25 @@ drwxr-xr-x 1 Lucas Di Candia 197121     0 Oct  8 09:05 ..
 `← Bash`
 
 ```text
-1	"""Command-line interface for gcsgrep."""
-     2	
-     3	from __future__ import annotations
-     4	
-     5	import argparse
-     6	import sys
-     7	from typing import TextIO
-     8	
-     9	from .gcs import CostLimitReached, GcsGrepError, create_storage_client, parse_gs_uri, scan
-    10	
-    11	
-    12	def _positive_int(value: str) -> int:
-    13	    try:
-    14	        parsed = int(value)
-    15	    except ValueError as exc:
-    16	        raise argparse.ArgumentTypeError("debe ser un entero positivo") from exc
-    17	    if parsed <= 0:
-    18	        raise argparse.Argumen
-… [8216 caracteres más]
+1	"""Command-line interface for gcsgrep."""
+     2	
+     3	from __future__ import annotations
+     4	
+     5	import argparse
+     6	import sys
+     7	from typing import TextIO
+     8	
+     9	from .gcs import CostLimitReached, GcsGrepError, create_storage_client, parse_gs_uri, scan
+    10	
+    11	
+    12	def _positive_int(value: str) -> int:
+    13	    try:
+    14	        parsed = int(value)
+    15	    except ValueError as exc:
+    16	        raise argparse.ArgumentTypeError("debe ser un entero positivo") from exc
+    17	    if parsed <= 0:
+    18	        raise argparse.ArgumentTypeError("debe 
+… [7976 caracteres más]
 ```
 
 `→ Bash` {"command": "cat -n src/gcsgrep/gcs.py; sed -n 1,140p tests/test_gcsgrep.py"}
@@ -60,27 +60,27 @@ drwxr-xr-x 1 Lucas Di Candia 197121     0 Oct  8 09:05 ..
 `← Bash`
 
 ```text
-1	"""Google Cloud Storage access and streaming scan primitives."""
-     2	
-     3	from __future__ import annotations
-     4	
-     5	from dataclasses import dataclass
-     6	from itertools import chain
-     7	from typing import Callable, Iterable
-     8	
-     9	from .matcher import find_matches
-    10	
-    11	SAMPLE_SIZE = 8192
-    12	CHUNK_SIZE = 64 * 1024
-    13	
-    14	
-    15	class GcsGrepError(Exception):
-    16	    """Expected operational error shown without a traceback."""
-    17	
-    18	
-    19	class CostLimitReached(GcsGrepError):
-    20	    """The configured object 
-… [10658 caracteres más]
+1	"""Google Cloud Storage access and streaming scan primitives."""
+     2	
+     3	from __future__ import annotations
+     4	
+     5	from dataclasses import dataclass
+     6	from itertools import chain
+     7	from typing import Callable, Iterable
+     8	
+     9	from .matcher import find_matches
+    10	
+    11	SAMPLE_SIZE = 8192
+    12	CHUNK_SIZE = 64 * 1024
+    13	
+    14	
+    15	class GcsGrepError(Exception):
+    16	    """Expected operational error shown without a traceback."""
+    17	
+    18	
+    19	class CostLimitReached(GcsGrepError):
+    20	    """The configured object or byte limit was r
+… [10478 caracteres más]
 ```
 
 `→ Bash` {"command": "grep -n \"def test_\\|max-objects\\|max-bytes\\|had_errors\\|stderr\\b\" tests/test_gcsgrep.py | head -80; sed -n 140,540p tests/test_gcsgrep.py | grep -n \"limit\\|invalid\\|utf\" | head -30; grep -n \"def test_\\|skip\" tests/integration/test_emulator.py | head -40"}
@@ -126,7 +126,7 @@ def test_vc6_failed_object_is_reported_and_scan_continues():
 
 def test_vc6_lines_before_the_invalid_line_are_kept():
     blobs = [FakeBlob("partial/mixed.log", b"timeout 1\ncaf\xe9 timeout 2\nt
-… [935 caracteres más]
+… [934 caracteres más]
 ```
 
 `← Bash`
@@ -139,22 +139,22 @@ def test_vc6_lines_before_the_invalid_line_are_kept():
 05-git-log.txt
 05-hook-bloquea.jsonl
 06-hook-corrige-y-pasa.jsonl
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/spec-gate.sh\"",
-            "timeout": 30
-          }
-        ]
-      }
-    ]
-  }
-}
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/spec-gate.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
 commit_command.py
 spec-gate.sh
 ```
@@ -175,28 +175,28 @@ File created successfully at: C:\Users\Lucas Di Candia\AppData\Local\Temp\claude
 `← Bash`
 
 ```text
-tarea/evidencia/specs/gcsgrep-count.md: 2 problemas — 14 requerimientos, 14 VCs
-
-| Requerimiento | VC |
-|---|---|
-| INV-1 | VC-INV-1 |
-| INV-2 | VC-INV-2 |
-| INV-3 | VC-INV-3 |
-| FR-1 | VC-FR-1 |
-| FR-2 | VC-FR-2 |
-| FR-3 | VC-FR-3 |
-| FR-4 | VC-FR-4 |
-| FR-5 | VC-FR-5 |
-| FR-6 | VC-FR-6 |
-| FR-7 | VC-FR-7 |
-| FR-8 | VC-FR-8 |
-| FR-9 | VC-FR-9 |
-| FR-10 | VC-FR-10 |
-| FR-11 | VC-FR-11 |
-
-tarea/evidencia/specs/gcsgrep-count.md:56: placeholder sin completar '<línea>'
-tarea/evidencia/specs/gcsgrep-count.md:160: placeholder sin completar '<Pegá acá la tabla que imprime check_sp
-… [36 caracteres más]
+tarea/evidencia/specs/gcsgrep-count.md: 2 problemas — 14 requerimientos, 14 VCs
+
+| Requerimiento | VC |
+|---|---|
+| INV-1 | VC-INV-1 |
+| INV-2 | VC-INV-2 |
+| INV-3 | VC-INV-3 |
+| FR-1 | VC-FR-1 |
+| FR-2 | VC-FR-2 |
+| FR-3 | VC-FR-3 |
+| FR-4 | VC-FR-4 |
+| FR-5 | VC-FR-5 |
+| FR-6 | VC-FR-6 |
+| FR-7 | VC-FR-7 |
+| FR-8 | VC-FR-8 |
+| FR-9 | VC-FR-9 |
+| FR-10 | VC-FR-10 |
+| FR-11 | VC-FR-11 |
+
+tarea/evidencia/specs/gcsgrep-count.md:56: placeholder sin completar '<línea>'
+tarea/evidencia/specs/gcsgrep-count.md:160: placeholder sin completar '<Pegá acá la tabla que imprime check_spec.py cuando la spec
+… [15 caracteres más]
 ```
 
 `→ Bash` {"command": "f=tarea/evidencia/specs/gcsgrep-count.md; sed -i '56s#`<uri>:<línea>` o `<uri>:<n>:<línea>` con `-n`#`gs://B/a.log:timeout 1`, o `gs://B/a.log:2:timeout 1` con `-n`,#' $f && sed -n 56p $f && python - 2>/dev/null; py -3 - <<'EOF'\np='tarea/evidencia/specs/gcsgrep-count.md'\ns=open(p,encoding='utf-8').read()\nt=\"\"\"| Requerimiento | VC |\n|---|---|\n\"\"\"+\"\".join(f\"| {r} | VC-{r} 
@@ -206,8 +206,8 @@ tarea/evidencia/specs/gcsgrep-count.md:160: placeholder sin completar '<Pegá ac
 
 ```text
 Sin `-c`, cada línea coincidente se imprime como `gs://B/a.log:timeout 1`, o `gs://B/a.log:2:timeout 1` con `-n`, (`cli.py:63-67`).
-tarea/evidencia/specs/gcsgrep-count.md: OK — 14 requerimientos, 14 VCs
-
+tarea/evidencia/specs/gcsgrep-count.md: OK — 14 requerimientos, 14 VCs
+
 exit=0
 ```
 
@@ -522,8 +522,8 @@ The file C:\Users\Lucas Di Candia\AppData\Local\Temp\claude\c--Users-Lucas-Di-Ca
 `← Bash`
 
 ```text
-10 passed, 31 deselected in 0.03s
-31 tests collected in 0.01s
+10 passed, 31 deselected in 0.03s
+31 tests collected in 0.01s
 # --- VC-21 / FR-11: URI inválido ---------------------------------------------
 
 
@@ -538,8 +538,8 @@ def test_vc21_invalid_uri_fails_before_loading_credentials(location):
     code = main(["x", location], client_factory=failing_factory, stdout=stdout, stderr=stderr)
 
     assert code == 2
-    assert stdout.ge
-… [1467 caracteres más]
+    assert stdout.getv
+… [1465 caracteres más]
 ```
 
 `→ Edit` {"replace_all": false, "file_path": "C:\\Users\\Lucas Di Candia\\AppData\\Local\\Temp\\claude\\c--Users-Lucas-Di-Candia-Desktop-SDD-TPS-SDD\\c7c640ec-ddad-40b1-a775-263f8cc414d1\\scratchpad\\clon\\TP3 Skills & Agents\\tarea\\evidencia\\specs\\gcsgrep-count.md", "old_string": "- **VC-FR-11** · `py -3 -c \"import sys; sys.path.insert(0, 'src'); from gcsgrep.cli import build_parser; print(build_parse
@@ -576,33 +576,33 @@ The file C:\Users\Lucas Di Candia\AppData\Local\Temp\claude\c--Users-Lucas-Di-Ca
 
 ```text
 exit=0
-tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
-
-| Requerimiento | VC |
-|---|---|
-| INV-1 | VC-INV-1 |
-| INV-2 | VC-INV-2 |
-| INV-3 | VC-INV-3 |
-| INV-4 | VC-INV-4 |
-| INV-5 | VC-INV-5 |
-| FR-1 | VC-FR-1 |
-| FR-2 | VC-FR-2 |
-| FR-3 | VC-FR-3 |
-| FR-4 | VC-FR-4 |
-| FR-5 | VC-FR-5 |
-| FR-6 | VC-FR-6 |
-| FR-7 | VC-FR-7 |
-| FR-8 | VC-FR-8 |
-| FR-9 | VC-FR-9 |
-| FR-10 | VC-FR-10 |
-| FR-11 | VC-FR-11 |
-| FR-12 | VC-FR-12 |
-| FR-13 | VC-FR-13 |
-| FR-14 | VC-FR-14 |
-| FR-15 | VC-FR-15 |
-
-44:| Tests nuevos en `tests/integration/test_emulator.py` | 
-… [1233 caracteres más]
+tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
+
+| Requerimiento | VC |
+|---|---|
+| INV-1 | VC-INV-1 |
+| INV-2 | VC-INV-2 |
+| INV-3 | VC-INV-3 |
+| INV-4 | VC-INV-4 |
+| INV-5 | VC-INV-5 |
+| FR-1 | VC-FR-1 |
+| FR-2 | VC-FR-2 |
+| FR-3 | VC-FR-3 |
+| FR-4 | VC-FR-4 |
+| FR-5 | VC-FR-5 |
+| FR-6 | VC-FR-6 |
+| FR-7 | VC-FR-7 |
+| FR-8 | VC-FR-8 |
+| FR-9 | VC-FR-9 |
+| FR-10 | VC-FR-10 |
+| FR-11 | VC-FR-11 |
+| FR-12 | VC-FR-12 |
+| FR-13 | VC-FR-13 |
+| FR-14 | VC-FR-14 |
+| FR-15 | VC-FR-15 |
+
+44:| Tests nuevos en `tests/integration/test_emulator.py` | Requieren emulador o GCP 
+… [1208 caracteres más]
 ```
 
 **Claude:** Ya corregí los 4 bloqueantes y `check_spec.py` vuelve a dar 0. Pego la tabla de trazabilidad y hago la segunda revisión.
@@ -612,7 +612,7 @@ tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
 `← Bash`
 
 ```text
-tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
+tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
 | FR-12 | VC-FR-12 |
 | FR-13 | VC-FR-13 |
 | FR-14 | VC-FR-14 |
@@ -936,14 +936,14 @@ duration_ms: 142189</usage>
 `← Bash`
 
 ```text
-Traceback (most recent call last):
-  File "<stdin>", line 7, in <module>
-  File "<stdin>", line 5, in rep
-AssertionError: - **VC-FR-9** � `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout
-"), FakeBlob("big.log", b"timeout
-", size=1024**3 + 1)])` \u2192 exit code `2`, stdout `"gs://B/a.log:1
-"`, stderr contiene `"gcsgrep: l�mite de seguridad alcanzado: m�ximo 1073741824 bytes"`
-tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+  File "<stdin>", line 5, in rep
+AssertionError: - **VC-FR-9** � `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout
+"), FakeBlob("big.log", b"timeout
+", size=1024**3 + 1)])` \u2192 exit code `2`, stdout `"gs://B/a.log:1
+"`, stderr contiene `"gcsgrep: l�mite de seguridad alcanzado: m�ximo 1073741824 bytes"`
+tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
 exit=0
 ```
 
@@ -953,11 +953,11 @@ exit=0
 `← Bash`
 
 ```text
-Traceback (most recent call last):
-  File "C:\Users\LUCASD~1\AppData\Local\Temp\fix.py", line 7, in <module>
-    rep('- **VC-FR-9** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout\n"), FakeBlob("big.log", b"timeout\n", size=1024**3 + 1)])` → exit code `2`, stdout `"gs://B/a.log:1\n"`, stderr contiene `"gcsgrep: límite de seguridad alcanzado: máximo 1073741824 bytes"`',
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-… [1126 caracteres más]
+Traceback (most recent call last):
+  File "C:\Users\LUCASD~1\AppData\Local\Temp\fix.py", line 7, in <module>
+    rep('- **VC-FR-9** · `run(["-c", "timeout", "gs://B/"], [FakeBlob("a.log", b"timeout\n"), FakeBlob("big.log", b"timeout\n", size=1024**3 + 1)])` → exit code `2`, stdout `"gs://B/a.log:1\n"`, stderr contiene `"gcsgrep: límite de seguridad alcanzado: máximo 1073741824 bytes"`',
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+… [1113 caracteres más]
 ```
 
 **Claude:** Paso a hacer los cambios con Edit, que es más fiable que el script en esta shell.
@@ -1022,7 +1022,7 @@ The file C:\Users\Lucas Di Candia\AppData\Local\Temp\claude\c--Users-Lucas-Di-Ca
 `← Bash`
 
 ```text
-tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
+tarea/evidencia/specs/gcsgrep-count.md: OK — 20 requerimientos, 20 VCs
 exit=0
 ?? tarea/evidencia/specs/
 ```
@@ -1343,3 +1343,5 @@ Hay además dos problemas menores:
 **Fin:** success · turnos 34 · 670 s
 
 **Herramientas usadas:** sesión principal 32 · dentro del subagent 29
+
+**Eventos del JSONL no transcriptos** (ruido de runtime, sin contenido del modelo): rate_limit_event ×23, system:hook_response ×5, system:hook_started ×5, system:task_notification ×3, system:task_progress ×29, system:task_started ×3, system:task_updated ×3, system:thinking_tokens ×111, tool_progress ×11

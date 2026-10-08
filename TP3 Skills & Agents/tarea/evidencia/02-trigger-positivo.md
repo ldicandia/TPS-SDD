@@ -14,6 +14,12 @@ Launching skill: write-spec-brownfield
 `→ Bash` {"command": "cd \"/c/Users/Lucas Di Candia/Desktop/SDD/TPS-SDD/TP1 Greenfield/Tarea\" && git rev-parse HEAD && git status --short | head -20 && ls -R | grep -v node_modules | head -80; cat \"/c/Users/Lucas Di Candia/Desktop/SDD/TPS-SDD/TP3 Skills & Agents/.claude/skills/write-spec-brownfield/plantilla.md\"; ls \"/c/Users/Lucas Di Candia/Desktop/SDD/TPS-SDD/TP3 Skills & Agents/.claude/\"*", "descri
 … [46 caracteres más]
 
+`✗ permiso denegado · Bash`
+
+```text
+This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it.
+```
+
 `← Bash (error)`
 
 ```text
@@ -22,6 +28,12 @@ This command changes directory before running a version-control command, which c
 
 `→ Bash` {"command": "T=\"/c/Users/Lucas Di Candia/Desktop/SDD/TPS-SDD/TP1 Greenfield/Tarea\"; git -C \"$T\" rev-parse HEAD; git -C \"$T\" status --short | head -20; ls -R \"$T\" | head -80; cat \"/c/Users/Lucas Di Candia/Desktop/SDD/TPS-SDD/TP3 Skills & Agents/.claude/skills/write-spec-brownfield/plantilla.md\"; ls -R \"/c/Users/Lucas Di Candia/Desktop/SDD/TPS-SDD/TP3 Skills & Agents/.claude/\"", "descrip
 … [45 caracteres más]
+
+`✗ permiso denegado · Bash`
+
+```text
+This Bash command contains multiple operations. The following parts require approval: T="/c/Users/Lucas Di Candia/Desktop/SDD/TPS-SDD/TP1 Greenfield/Tarea"; git -C "$T" rev-parse HEAD; git -C "$T" status --short, head -20; ls -R "$T"
+```
 
 `← Bash (error)`
 
@@ -33,3 +45,5 @@ This Bash command contains multiple operations. The following parts require appr
 **Fin:** error_max_turns · turnos 4 · 14 s
 
 **Herramientas usadas:** sesión principal 3 · dentro del subagent 0
+
+**Eventos del JSONL no transcriptos** (ruido de runtime, sin contenido del modelo): rate_limit_event ×3, system:hook_response ×5, system:hook_started ×5

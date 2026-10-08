@@ -21,7 +21,7 @@ Todas las rutas de este README son relativas a `TP3 Skills & Agents/`.
 
 | Pieza | Archivo | Qué hace | Concepto de L1–L2 | Cuándo la usan |
 |---|---|---|---|---|
-| 📘 Skill `write-spec-brownfield` | [`.claude/skills/write-spec-brownfield/SKILL.md`](../.claude/skills/write-spec-brownfield/SKILL.md) + [`plantilla.md`](../.claude/skills/write-spec-brownfield/plantilla.md) + [`scripts/check_spec.py`](../.claude/skills/write-spec-brownfield/scripts/check_spec.py) | Arma `specs/<slug>.md` desde una plantilla que exige: base (hash), alcance dentro/fuera, invariantes con comando, cada FR en Dado/Cuando/Entonces con su `VC-FR-N` y cada decisión con `archivo:línea`. Un script valida todo eso y genera la tabla de trazabilidad. | **Cobertura de VCs** y **alcance acotado**; también **spec antes que código** y spec anclada a una revisión del código (brownfield, L2). | Cuando alguien pide especificar un cambio sobre código que ya existe, antes de implementarlo ("especificá…", "armá la spec antes de tocar código"). Carga sola. |
+| 📘 Skill `write-spec-brownfield` | [`.claude/skills/write-spec-brownfield/SKILL.md`](../.claude/skills/write-spec-brownfield/SKILL.md) + [`plantilla.md`](../.claude/skills/write-spec-brownfield/plantilla.md) + [`scripts/check_spec.py`](../.claude/skills/write-spec-brownfield/scripts/check_spec.py) | Arma `specs/<slug>.md` desde una plantilla que exige: base (hash), alcance dentro/fuera, invariantes con comando, cada FR en Dado/Cuando/Entonces con su `VC-FR-N` y cada decisión con `archivo:línea`. El script valida la estructura, exige campos completos y genera la tabla de trazabilidad; el revisor comprueba la coherencia con el código. | **Cobertura de VCs** y **alcance acotado**; también **spec antes que código** y spec anclada a una revisión del código (brownfield, L2). | Cuando alguien pide especificar un cambio sobre código que ya existe, antes de implementarlo ("especificá…", "armá la spec antes de tocar código"). Carga sola. |
 | 👥 Subagent `spec-reviewer` | [`.claude/agents/spec-reviewer.md`](../.claude/agents/spec-reviewer.md) | Revisor de solo lectura (`tools: Read, Grep, Glob`). Abre cada `archivo:línea` que cita la spec, comprueba que los datos de cada VC alcancen para dar el resultado y devuelve un veredicto cerrado `READY` / `NEEDS WORK`, con hallazgos `spec:línea` y evidencia `archivo:línea`. | **Gate independiente**: quien revisa no es quien escribió. También **higiene de contexto**: las lecturas de código quedan en la ventana del subagent. | Lo lanza el skill en su paso 9. También cuando alguien pregunta "¿está lista esta spec?" o "revisala". |
 | 🪝 Hook `spec-gate` | [`.claude/hooks/spec-gate.sh`](../.claude/hooks/spec-gate.sh) + [`commit_command.py`](../.claude/hooks/commit_command.py), registrados en [`.claude/settings.json`](../.claude/settings.json) | `PreToolUse` con matcher `Bash\|PowerShell`. Analiza invocaciones directas de Git respetando comillas, veta commits compuestos o dirigidos a otro repo y valida por separado el contenido del índice y la copia de trabajo. Si la política o el checker fallan, sale con `exit 2` y explica qué corregir. | **Cobertura de VCs**: aplica la validación estructural al contenido staged y conserva el control de la copia de trabajo, dentro de la gramática documentada abajo. | Corre en cada comando de shell del agente; chequea los commits directos que reconoce. |
 
@@ -36,6 +36,32 @@ Todas las rutas de este README son relativas a `TP3 Skills & Agents/`.
 `write-spec-brownfield` llama a `check_spec.py` en el paso 8 y lanza `spec-reviewer` en el
 paso 9. `spec-gate` corre el mismo `check_spec.py` en el commit, así que la regla que hace
 cumplir el hook es la misma que pide el skill: una sola fuente de verdad.
+
+### Qué comprueba el checker
+
+- Cada FR tiene un bullet por campo: `- **Dado** …`, `- **Cuando** …` y
+  `- **Entonces** …`, con contenido en la misma línea. Campos vacíos, puntuación
+  sola o etiquetas mencionadas dentro de otro párrafo no alcanzan.
+- Cada VC de FR, INV o NFR ocupa una línea: entrada/comando no vacío entre
+  backticks, `→` fuera de los backticks y resultado esperado no vacío después.
+  Si hay varios `→`, ninguno puede quedar sin contenido posterior. Una salida
+  vacía explícita, como ``stdout `""`, exit 1``, sí es un resultado.
+- Cada NFR tiene un único bullet **Métrica**, **Umbral** y **Carga**. Métrica
+  nombra qué se mide; umbral y carga incluyen números con unidad o condición.
+  Los números de anclas `archivo:línea` o `archivo:inicio-fin` no cuentan como
+  medida. Si el cambio no necesita NFR, se elimina esa sección completa.
+
+`OK` significa que pasó estos controles y los demás controles estructurales del
+script. El checker no ejecuta los VCs, no verifica que las anclas existan y no
+demuestra que los datos produzcan el resultado declarado ni que una métrica sea
+adecuada. Esas comprobaciones requieren la lectura del revisor y, al implementar,
+la ejecución de los tests. Un texto no vacío puede seguir siendo ambiguo; el
+formato por sí solo no demuestra corrección semántica.
+
+La corrección 3 exige los tres campos explícitos de NFR, en lugar de un párrafo
+libre con algún número. La spec de ejemplo se adaptó conservando sus límites
+de lectura y su carga; las transcripciones anteriores conservan el formato
+histórico que realmente se ejecutó.
 
 ## Instalación
 
@@ -66,6 +92,8 @@ esa corrección aún no se volvió a ejecutar dentro de Claude Code en Windows.
 La corrección de comandos se verificó con 23 tests en macOS (evidencia 09).
 Incluyen eventos etiquetados PowerShell alimentados por stdin al hook; no prueban
 una sesión nativa de PowerShell ni Claude Code en Windows.
+La corrección del checker se probó junto con las anteriores mediante 41 tests
+en macOS (evidencia 10); no se volvió a ejecutar el flujo del skill/revisor en Claude.
 
 **Bit de ejecución:** en Windows git no lo registra solo. Al commitear el toolkit, corré
 desde la raíz del repo:
@@ -137,7 +165,7 @@ stageá la eliminación con `git add -u`. El hook solo lee: nunca cambia el índ
 
 ## Evidencia
 
-Todas son sesiones nuevas de `claude -p --output-format stream-json --verbose`, abiertas
+Las sesiones 01–06 usan `claude -p --output-format stream-json --verbose`, abiertas
 desde `TP3 Skills & Agents/`. El JSONL crudo está en [`evidencia/raw/`](evidencia/raw/), y
 la transcripción legible se generó con [`evidencia/transcribir.py`](evidencia/transcribir.py).
 Ninguna sesión commiteó en este repo. El bloqueo y el commit que pasa (05–07) corrieron en
@@ -154,12 +182,14 @@ un **clon descartable** del repo con el toolkit copiado.
 | 07 | Reproducción del §7 alimentando el hook por stdin. Condición mala: `exit 2` en las cinco variantes de commit y con PowerShell. Comandos que no son commit: `exit 0`. Evento malformado: `exit 2`. Condición buena: `exit 0`. | [`07-hook-reproduccion.txt`](evidencia/07-hook-reproduccion.txt) |
 | 08 | Regresiones de la corrección del índice: bloquea specs staged inválidas aunque se corrijan o borren del disco; permite volver a stagear la corrección y eliminar una spec del índice; mantiene la política conservadora para `-a`, rutas y eventos PowerShell. Cada caso usa un repo temporal y comprueba que el hook no altere el índice. Es ejecución directa del hook, sin una sesión nueva de Claude. | [`08-hook-indice.txt`](evidencia/08-hook-indice.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 09 | Regresiones de los comandos, incluidas las 12 del índice: rutas `-C` entre comillas, commits compuestos con specs nuevas, destino externo, menciones que no deben disparar y mensajes con operadores como texto. Guarda la salida real y hashes de los archivos probados; cada caso comprueba que el hook no cambie el árbol del índice. | [`09-hook-comandos.txt`](evidencia/09-hook-comandos.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
+| 10 | Corrección del checker: 16 tests de campos FR/NFR y VCs, más las 23 regresiones anteriores del hook y 2 nuevas de bloqueo estructural en índice/copia de trabajo. Incluye salida real, hashes y comprobación directa de la spec adaptada. | [`10-checker-estructura.txt`](evidencia/10-checker-estructura.txt) · [`tests/test_check_spec.py`](tests/test_check_spec.py) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 
 Las sesiones 01–04 corrieron antes de los dos arreglos de arriba. Ninguna intentó un commit,
-y la spec de 01 da OK también con el `check_spec.py` actual.
+y la spec de 01 adaptada a los campos explícitos de NFR da OK con el checker actual.
 Las evidencias 05–07 también son anteriores a la corrección del índice; se conservan
 como historial. La evidencia 08 verifica la corrección del índice y la 09 ambas
-correcciones. Las evidencias 08–09 son tests directos, no sesiones de Claude Code.
+correcciones en sus versiones de entonces. Las evidencias 08–10 son tests directos,
+no sesiones de Claude Code; la 10 verifica las tres correcciones juntas.
 
 ### Casos de trigger del skill (como VCs)
 
@@ -189,7 +219,7 @@ echo "$EVENT" | CLAUDE_PROJECT_DIR="$PWD" bash .claude/hooks/spec-gate.sh; echo 
 # Chequeo directo de una spec
 py -3 .claude/skills/write-spec-brownfield/scripts/check_spec.py tarea/evidencia/specs/gcsgrep-count.md
 
-# Regresiones del índice: crean y eliminan repositorios temporales
+# Regresiones del checker y del hook: usan repositorios temporales para el hook
 python3 -m unittest discover -s tarea/tests -v  # Windows: py -3 en lugar de python3
 ```
 

@@ -27,14 +27,21 @@ consigna y no en el código, alcance futuro mezclado con el de ahora.
    comprueba. *(Seguridad ante regresiones.)*
 6. **Requerimientos.** Un `### FR-N` por comportamiento, en Dado/Cuando/Entonces, y
    abajo su `VC-FR-N` con la entrada exacta y la salida/exit code esperados. Los datos
-   del VC tienen que alcanzar para producir ese resultado. NFR solo con número.
+   del VC tienen que alcanzar para producir ese resultado. Completá cada bullet
+   Dado/Cuando/Entonces en su propia línea. Cada VC ocupa una línea, con entrada
+   o comando no vacío entre backticks antes de `→` y resultado después.
+   Cada NFR lleva bullets **Métrica**, **Umbral** y **Carga**: qué se mide,
+   límite numérico con unidad/condición y carga numérica con unidades. Una cita
+   `archivo:línea` no aporta el número del umbral ni de la carga.
    *(Cobertura de VCs.)*
 7. **Decisiones.** Cada `D-N` con la alternativa descartada y un fundamento
    `archivo:línea` del código base que la sostiene. *(Spec anclada al código.)*
 8. **Chequeá.** Corré
    `python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py specs/<slug>.md`
    (en Windows, `py -3` en vez de `python3`). Corregí cada línea que reporte y repetí
-   hasta exit 0. Pegá en "## Trazabilidad" la tabla que imprime.
+   hasta exit 0. Pegá en "## Trazabilidad" la tabla que imprime. Es una validación
+   estructural: no ejecuta VCs ni comprueba la veracidad de los datos, resultados
+   o anclas; el paso 9 revisa su coherencia con el código.
 9. **Revisión independiente.** Lanzá el subagent `spec-reviewer` con la ruta de la
    spec. Si devuelve `NEEDS WORK`, corregí los hallazgos `BLOQUEANTE`, volvé al paso 8
    y relanzalo (máximo dos vueltas; si sigue, reportá lo pendiente). *(Gate independiente.)*
@@ -48,7 +55,9 @@ La plantilla completa está en [plantilla.md](plantilla.md). La forma que impone
 
 ```markdown
 ### FR-1 · <comportamiento>
-- **Dado** … - **Cuando** … - **Entonces** …
+- **Dado** …
+- **Cuando** …
+- **Entonces** …
 - **VC-FR-1** · `<comando exacto>` → <salida y exit code>
 
 | D-1 | <elegido> | <descartado> | `<archivo>:<línea>` <qué hace ese código> |
@@ -67,5 +76,6 @@ Un FR sin su `VC-FR-N` debajo, o una decisión sin `archivo:línea`, no pasa
   término una vez en "Términos" y usá solo esa palabra.
 - **Alcance futuro adentro.** Plan de iteraciones o "en v2 …" dentro de la spec
   (TP2): lo diferido va en "Fuera" con su porqué, o al plan.
-- **NFR sin número.** "Debe ser rápido" no se verifica: métrica, umbral y carga.
+- **NFR sin medida.** "Debe ser rápido" y una cita de código no fijan aceptación:
+  completá los tres campos de métrica, umbral y carga.
 - **Fuera genérico.** "Otras mejoras" no acota nada: nombrá módulos, flags o SO.

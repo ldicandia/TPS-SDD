@@ -1,0 +1,168 @@
+# Corrección 3 — validación estructural del checker, 2026-10-07
+# Ejecución directa: no es una sesión de Claude Code ni una revisión semántica.
+# Los tests del hook crean repos temporales y comprueban que no cambie el índice.
+# Plataforma: macOS-26.6.2-arm64-arm-64bit-Mach-O
+# Python: 3.14.7
+# Bash: GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+# Base Git: a3786eefa382397db8d33f6c5fde5015c3675792 + cambios locales de la corrección 3
+
+# SHA-256 de los archivos verificados
+26679b41690d98fff50afacfe580489ed1573e598ec3557c4e6bbb81cddca9c1  .claude/hooks/spec-gate.sh
+e575129683ab86fe2786999298ed72f31a0e6423ca0308bb4023dfc063e2af07  .claude/hooks/commit_command.py
+c6fd264281a21560d16c36ad8bcdfe4f5633a5ab513b647d9c4fde73dab62d95  .claude/skills/write-spec-brownfield/scripts/check_spec.py
+5649b00adec615a158045e0acc1f0d269d6fecddfc2646dcc10c2761cdf3f943  .claude/skills/write-spec-brownfield/plantilla.md
+d73feef6c1db272db570b6c6c5a345e309d8c465e744b7168ccc19f414e4726c  .claude/skills/write-spec-brownfield/SKILL.md
+7f793c7d07b68bb96c5105b999cf02f7152f911d32c0c16b469f4171ea5c067e  tarea/README.md
+94281d99fd9971a9df2e3f665ad691df6998dc223574799cd24db44a367741ac  tarea/tests/test_check_spec.py
+8e964b0a938a83941f35dea4df2fcf87a5cd843ef71e3724b4714bea95ebac53  tarea/tests/test_spec_gate.py
+52c8f9a9c347b397d204934fdb4f9952794e98afe0d40b4cdd993d3948bc8918  tarea/evidencia/specs/gcsgrep-count.md
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tarea/tests -v
+test_arrow_inside_command_does_not_replace_result_separator (test_check_spec.CheckSpecTests.test_arrow_inside_command_does_not_replace_result_separator) ... ok
+test_cli_stdin_reports_the_same_structural_error_and_exit_one (test_check_spec.CheckSpecTests.test_cli_stdin_reports_the_same_structural_error_and_exit_one) ... ok
+test_current_spec_passes_with_complete_trace (test_check_spec.CheckSpecTests.test_current_spec_passes_with_complete_trace) ... ok
+test_duplicate_field_is_rejected (test_check_spec.CheckSpecTests.test_duplicate_field_is_rejected) ... ok
+test_each_given_when_then_must_have_content (test_check_spec.CheckSpecTests.test_each_given_when_then_must_have_content) ... ok
+test_each_nfr_field_is_required_and_nonempty (test_check_spec.CheckSpecTests.test_each_nfr_field_is_required_and_nonempty) ... ok
+test_empty_expected_result_is_rejected (test_check_spec.CheckSpecTests.test_empty_expected_result_is_rejected) ... ok
+test_given_when_then_mentions_in_prose_are_not_fields (test_check_spec.CheckSpecTests.test_given_when_then_mentions_in_prose_are_not_fields) ... ok
+test_last_scenario_cannot_have_empty_result (test_check_spec.CheckSpecTests.test_last_scenario_cannot_have_empty_result) ... ok
+test_literal_arrow_and_explicit_empty_stdout_are_valid (test_check_spec.CheckSpecTests.test_literal_arrow_and_explicit_empty_stdout_are_valid) ... ok
+test_missing_or_empty_input_is_rejected_even_with_output (test_check_spec.CheckSpecTests.test_missing_or_empty_input_is_rejected_even_with_output) ... ok
+test_nfr_is_optional (test_check_spec.CheckSpecTests.test_nfr_is_optional) ... ok
+test_nfr_metric_must_name_a_measure (test_check_spec.CheckSpecTests.test_nfr_metric_must_name_a_measure) ... ok
+test_source_line_numbers_do_not_count_as_threshold_or_load (test_check_spec.CheckSpecTests.test_source_line_numbers_do_not_count_as_threshold_or_load) ... ok
+test_unclosed_backticks_are_rejected (test_check_spec.CheckSpecTests.test_unclosed_backticks_are_rejected) ... ok
+test_vc_without_expected_result_is_rejected_for_all_requirement_types (test_check_spec.CheckSpecTests.test_vc_without_expected_result_is_rejected_for_all_requirement_types) ... ok
+test_add_and_commit_is_also_rejected_with_valid_spec (test_spec_gate.SpecGateIndexTests.test_add_and_commit_is_also_rejected_with_valid_spec) ... ok
+test_add_and_commit_with_new_invalid_spec_blocks_before_add (test_spec_gate.SpecGateIndexTests.test_add_and_commit_with_new_invalid_spec_blocks_before_add) ... ok
+test_commit_a_checks_both_versions (test_spec_gate.SpecGateIndexTests.test_commit_a_checks_both_versions) ... ok
+test_commit_with_path_checks_both_versions (test_spec_gate.SpecGateIndexTests.test_commit_with_path_checks_both_versions) ... ok
+test_compound_commits_require_separate_calls (test_spec_gate.SpecGateIndexTests.test_compound_commits_require_separate_calls) ... ok
+test_empty_then_in_worktree_blocks_valid_index (test_spec_gate.SpecGateIndexTests.test_empty_then_in_worktree_blocks_valid_index) ... ok
+test_invalid_index_stays_blocked_after_worktree_deletion (test_spec_gate.SpecGateIndexTests.test_invalid_index_stays_blocked_after_worktree_deletion) ... ok
+test_invalid_index_stays_blocked_after_worktree_fix (test_spec_gate.SpecGateIndexTests.test_invalid_index_stays_blocked_after_worktree_fix) ... ok
+test_mentions_of_commit_are_not_git_commits (test_spec_gate.SpecGateIndexTests.test_mentions_of_commit_are_not_git_commits) ... ok
+test_new_invalid_staged_spec_blocks_after_worktree_fix (test_spec_gate.SpecGateIndexTests.test_new_invalid_staged_spec_blocks_after_worktree_fix) ... ok
+test_non_commit_passes_with_invalid_index (test_spec_gate.SpecGateIndexTests.test_non_commit_passes_with_invalid_index) ... ok
+test_other_repo_and_event_cwd_are_rejected (test_spec_gate.SpecGateIndexTests.test_other_repo_and_event_cwd_are_rejected) ... ok
+test_overrides_and_dynamic_c_paths_are_rejected (test_spec_gate.SpecGateIndexTests.test_overrides_and_dynamic_c_paths_are_rejected) ... ok
+test_powershell_event_validates_index (test_spec_gate.SpecGateIndexTests.test_powershell_event_validates_index) ... ok
+test_quoted_c_powershell_blocks_invalid_index (test_spec_gate.SpecGateIndexTests.test_quoted_c_powershell_blocks_invalid_index) ... ok
+test_quoted_c_same_repo_passes_valid_spec (test_spec_gate.SpecGateIndexTests.test_quoted_c_same_repo_passes_valid_spec) ... ok
+test_quoted_c_with_spaces_blocks_invalid_index (test_spec_gate.SpecGateIndexTests.test_quoted_c_with_spaces_blocks_invalid_index) ... ok
+test_quoted_message_operators_are_data (test_spec_gate.SpecGateIndexTests.test_quoted_message_operators_are_data) ... ok
+test_restage_fixed_spec_passes (test_spec_gate.SpecGateIndexTests.test_restage_fixed_spec_passes) ... ok
+test_staged_deletion_passes (test_spec_gate.SpecGateIndexTests.test_staged_deletion_passes) ... ok
+test_staged_deletion_with_invalid_recreated_file_blocks (test_spec_gate.SpecGateIndexTests.test_staged_deletion_with_invalid_recreated_file_blocks) ... ok
+test_structural_defects_in_index_stay_blocked_after_worktree_fix (test_spec_gate.SpecGateIndexTests.test_structural_defects_in_index_stay_blocked_after_worktree_fix) ... ok
+test_unbalanced_quotes_are_rejected (test_spec_gate.SpecGateIndexTests.test_unbalanced_quotes_are_rejected) ... ok
+test_valid_index_invalid_worktree_blocks_conservatively (test_spec_gate.SpecGateIndexTests.test_valid_index_invalid_worktree_blocks_conservatively) ... ok
+test_valid_staged_change_passes (test_spec_gate.SpecGateIndexTests.test_valid_staged_change_passes) ... ok
+
+----------------------------------------------------------------------
+Ran 41 tests in 6.808s
+
+OK
+
+exit=0
+
+$ python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py tarea/evidencia/specs/gcsgrep-count.md
+tarea/evidencia/specs/gcsgrep-count.md: OK — 12 requerimientos, 12 VCs
+
+| Requerimiento | VC |
+|---|---|
+| INV-1 | VC-INV-1 |
+| INV-2 | VC-INV-2 |
+| INV-3 | VC-INV-3 |
+| FR-1 | VC-FR-1 |
+| FR-2 | VC-FR-2 |
+| FR-3 | VC-FR-3 |
+| FR-4 | VC-FR-4 |
+| FR-5 | VC-FR-5 |
+| FR-6 | VC-FR-6 |
+| FR-7 | VC-FR-7 |
+| FR-8 | VC-FR-8 |
+| NFR-1 | VC-NFR-1 |
+
+
+exit=0
+
+# Caso inválido por stdin; única mutación: - **VC-FR-1** · `run(datos)` →
+
+$ python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py --stdin specs/caso.md
+specs/caso.md: 1 problemas — 12 requerimientos, 12 VCs
+
+| Requerimiento | VC |
+|---|---|
+| INV-1 | VC-INV-1 |
+| INV-2 | VC-INV-2 |
+| INV-3 | VC-INV-3 |
+| FR-1 | VC-FR-1 |
+| FR-2 | VC-FR-2 |
+| FR-3 | VC-FR-3 |
+| FR-4 | VC-FR-4 |
+| FR-5 | VC-FR-5 |
+| FR-6 | VC-FR-6 |
+| FR-7 | VC-FR-7 |
+| FR-8 | VC-FR-8 |
+| NFR-1 | VC-NFR-1 |
+
+specs/caso.md:78: VC sin resultado esperado después de → — indicá salida, exit code o una aserción observable
+
+exit=1
+
+# Caso inválido por stdin; única mutación: - **Dado**
+
+$ python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py --stdin specs/caso.md
+specs/caso.md: 8 problemas — 12 requerimientos, 12 VCs
+
+| Requerimiento | VC |
+|---|---|
+| INV-1 | VC-INV-1 |
+| INV-2 | VC-INV-2 |
+| INV-3 | VC-INV-3 |
+| FR-1 | VC-FR-1 |
+| FR-2 | VC-FR-2 |
+| FR-3 | VC-FR-3 |
+| FR-4 | VC-FR-4 |
+| FR-5 | VC-FR-5 |
+| FR-6 | VC-FR-6 |
+| FR-7 | VC-FR-7 |
+| FR-8 | VC-FR-8 |
+| NFR-1 | VC-NFR-1 |
+
+specs/caso.md:75: FR-1 con **Dado** vacío — completá el campo
+specs/caso.md:82: FR-2 con **Dado** vacío — completá el campo
+specs/caso.md:89: FR-3 con **Dado** vacío — completá el campo
+specs/caso.md:96: FR-4 con **Dado** vacío — completá el campo
+specs/caso.md:103: FR-5 con **Dado** vacío — completá el campo
+specs/caso.md:110: FR-6 con **Dado** vacío — completá el campo
+specs/caso.md:117: FR-7 con **Dado** vacío — completá el campo
+specs/caso.md:124: FR-8 con **Dado** vacío — completá el campo
+
+exit=1
+
+# Caso inválido por stdin; única mutación: - **Umbral** Debe ser rápido (`src/gcs.py:94-101`).
+
+$ python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py --stdin specs/caso.md
+specs/caso.md: 1 problemas — 12 requerimientos, 12 VCs
+
+| Requerimiento | VC |
+|---|---|
+| INV-1 | VC-INV-1 |
+| INV-2 | VC-INV-2 |
+| INV-3 | VC-INV-3 |
+| FR-1 | VC-FR-1 |
+| FR-2 | VC-FR-2 |
+| FR-3 | VC-FR-3 |
+| FR-4 | VC-FR-4 |
+| FR-5 | VC-FR-5 |
+| FR-6 | VC-FR-6 |
+| FR-7 | VC-FR-7 |
+| FR-8 | VC-FR-8 |
+| NFR-1 | VC-NFR-1 |
+
+specs/caso.md:132: NFR-1 con **Umbral** sin medida numérica contextualizada — indicá cantidad y unidad/condición; las anclas no cuentan
+
+exit=1

@@ -81,6 +81,34 @@ class SpecGateIndexTests(unittest.TestCase):
         self.assert_blocked()
         self.assertNotIn(b"- **VC-FR-1**", self.git("show", ":TP3 Skills & Agents/specs/caso con espacios.md"))
 
+    def test_structural_defects_in_index_stay_blocked_after_worktree_fix(self):
+        cases = (
+            ("- **VC-FR-1**", "- **VC-FR-1** · `run(datos)` →", "VC sin resultado esperado"),
+            ("- **Dado**", "- **Dado**", "FR-1 con **Dado** vacío"),
+            ("- **Umbral**", "- **Umbral** Debe ser rápido (`src/gcs.py:94-101`).",
+             "NFR-1 con **Umbral** sin medida numérica"),
+        )
+        for prefix, replacement, diagnostic in cases:
+            with self.subTest(prefix=prefix):
+                content = "\n".join(replacement if line.startswith(prefix) else line
+                                    for line in VALID.splitlines()) + "\n"
+                self.spec.write_text(content, encoding="utf-8")
+                self.git("add", "specs/caso con espacios.md")
+                self.spec.write_text(VALID, encoding="utf-8")
+                code, error = self.gate()
+                self.assertEqual(code, 2, error)
+                self.assertIn("[staged]", error)
+                self.assertIn(diagnostic, error)
+
+    def test_empty_then_in_worktree_blocks_valid_index(self):
+        content = "\n".join("- **Entonces**" if line.startswith("- **Entonces**") else line
+                            for line in VALID.splitlines()) + "\n"
+        self.spec.write_text(content, encoding="utf-8")
+        code, error = self.gate()
+        self.assertEqual(code, 2, error)
+        self.assertIn("[copia de trabajo]", error)
+        self.assertIn("FR-1 con **Entonces** vacío", error)
+
     def test_invalid_index_stays_blocked_after_worktree_deletion(self):
         self.stage_invalid()
         self.spec.unlink()

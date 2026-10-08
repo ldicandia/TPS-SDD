@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Chequea que una spec brownfield (plantilla de write-spec-brownfield) no tenga huecos.
+"""Valida la estructura de una spec brownfield según plantilla.md.
+
+No ejecuta VCs ni prueba que sus datos, resultados o anclas sean correctos:
+esa comprobación semántica corresponde a spec-reviewer.
 
 Uso: python3 check_spec.py specs/<slug>.md [...]
      python3 check_spec.py --stdin specs/<slug>.md < contenido-del-indice
@@ -21,6 +24,41 @@ PLACEHOLDER = re.compile(r"<[^<>\n]{3,}>")
 # Los <placeholders> literales de la plantilla se detectan aunque queden dentro de backticks.
 PLANTILLA = set(PLACEHOLDER.findall((pathlib.Path(__file__).parent.parent / "plantilla.md").read_text(encoding="utf-8")))
 SECCIONES = ["Propósito", "Alcance", "Invariantes", "Requerimientos", "Decisiones"]
+REFERENCIA = re.compile(r"[\w./-]+\.\w+:\d+(?:-\d+)?")
+
+
+def tiene_contenido(texto):
+    """Descarta campos vacíos o compuestos solo de formato/puntuación."""
+    return bool(re.search(r"[^\W_]", texto))
+
+
+def campo(lines, cuerpo, nombre, rid, inicio, err):
+    patron = re.compile(r"^- \*\*" + re.escape(nombre) + r"\*\*\s*:?[ \t]*(.*)$")
+    valores = [(i, patron.match(lines[i - 1])) for i in cuerpo
+               if patron.match(lines[i - 1])]
+    if not valores:
+        err(inicio, f"{rid} sin **{nombre}** — agregá un bullet con contenido en la misma línea")
+        return "", inicio
+    if len(valores) > 1:
+        err(valores[1][0], f"{rid} repite **{nombre}** — usá un único campo")
+    i, match = valores[0]
+    valor = match.group(1)
+    if not tiene_contenido(valor):
+        err(i, f"{rid} con **{nombre}** vacío — completá el campo")
+    return valor, i
+
+
+def partes_vc(texto):
+    """Solo → fuera de código separa entrada de resultado (formato de una línea)."""
+    partes = [""]
+    for fragmento in re.split(r"(`[^`]*`)", texto):
+        if fragmento.startswith("`"):
+            partes[-1] += fragmento
+        else:
+            trozos = fragmento.split("→")
+            partes[-1] += trozos[0]
+            partes.extend(trozos[1:])
+    return partes
 
 
 def filas(lines, desde, hasta):
@@ -85,22 +123,35 @@ def check(path, content=None):
         if rid in ids:
             err(n, f"{rid} está definido dos veces")
         ids.add(rid)
-        texto = [lines[i - 1] for i in cuerpo]
         vcs = [(i, VC.match(lines[i - 1])) for i in cuerpo if VC.match(lines[i - 1])]
         if not vcs:
             err(n, f"{rid} no tiene su '- **VC-{rid}** · `comando` → resultado' — un requerimiento sin VC no es verificable")
         for i, v in vcs:
             if v.group(1) != rid:
                 err(i, f"VC-{v.group(1)} está bajo {rid} — cada VC va con el requerimiento que verifica")
-            if "`" not in lines[i - 1]:
-                err(i, "VC sin comando ni salida observable entre backticks")
+            contenido = lines[i - 1][v.end():]
+            partes = partes_vc(contenido)
+            if contenido.count("`") % 2:
+                err(i, "VC con backticks sin cerrar — cerrá cada fragmento de código")
+            if not any(tiene_contenido(c) for c in re.findall(r"`([^`]*)`", partes[0])):
+                err(i, "VC sin entrada/comando no vacío entre backticks antes de →")
+            if len(partes) < 2 or any(not tiene_contenido(p) for p in partes[1:]):
+                err(i, "VC sin resultado esperado después de → — indicá salida, exit code o una aserción observable")
             traza.append((rid, lines[i - 1].split("**")[1]))
         if rid.startswith("FR-"):
-            for palabra in ("**Dado**", "**Cuando**", "**Entonces**"):
-                if not any(palabra in t for t in texto):
-                    err(n, f"{rid} sin {palabra} — escribilo como Dado/Cuando/Entonces")
-        if rid.startswith("NFR-") and not any(re.search(r"\d", t) for t in texto if not VC.match(t)):
-            err(n, f"{rid} sin número — un NFR necesita métrica, umbral y carga")
+            for palabra in ("Dado", "Cuando", "Entonces"):
+                campo(lines, cuerpo, palabra, rid, n, err)
+        if rid.startswith("NFR-"):
+            for palabra in ("Métrica", "Umbral", "Carga"):
+                valor, i = campo(lines, cuerpo, palabra, rid, n, err)
+                # Una cita de código aporta evidencia, nunca la medida del NFR.
+                medida = REFERENCIA.sub("", valor)
+                if palabra == "Métrica":
+                    if valor and not re.search(r"[^\W\d_]", medida):
+                        err(i, f"{rid} sin métrica nombrada — indicá qué se mide")
+                elif valor and (not re.search(r"\d", medida)
+                                or not re.search(r"[^\W\d_]|%", medida)):
+                    err(i, f"{rid} con **{palabra}** sin medida numérica contextualizada — indicá cantidad y unidad/condición; las anclas no cuentan")
         for i in cuerpo:
             if FUTURO.search(lines[i - 1]):
                 err(i, f"alcance futuro ('{FUTURO.search(lines[i - 1]).group(0)}') dentro de un requerimiento — va al plan")

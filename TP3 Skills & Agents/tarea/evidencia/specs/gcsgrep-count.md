@@ -128,7 +128,9 @@ Sin modo conteo se imprime `uri:texto` o `uri:N:texto` con `-n`, en orden de lis
 
 ### NFR-1 · El modo conteo lee por streaming, igual que la base
 
-En modo conteo, cada lectura al stream del objeto pide como máximo 65.536 bytes (`CHUNK_SIZE`), un objeto de más de 73.728 bytes (`SAMPLE_SIZE + CHUNK_SIZE`) se lee en 3 lecturas o más, y no se crea ningún archivo local.
+- **Métrica** Tamaños solicitados al stream (`blob.stream.read_sizes`), cantidad de lecturas y archivos locales creados; se registran las lecturas y se parchean `open`/`tempfile` para fallar si se intenta crear un archivo.
+- **Umbral** Cada lectura solicita como máximo 65.536 bytes (`CHUNK_SIZE`), se realizan al menos 3 lecturas y se crean 0 archivos locales.
+- **Carga** Modo conteo sobre 1 objeto de más de 73.728 bytes (`SAMPLE_SIZE + CHUNK_SIZE`), con 3 líneas, 2 coincidentes y la segunda cruzando ese límite, como en el VC siguiente.
 
 - **VC-NFR-1** · test análogo a `test_vc3_matches_crossing_chunk_boundaries_without_local_files` (`tests/test_gcsgrep.py:136-163`) con el mismo contenido de 3 líneas (2 coincidentes, la segunda cruzando `SAMPLE_SIZE + CHUNK_SIZE`), `open`/`tempfile` parcheados para fallar, ejecutando `run(["-c", "timeout", "gs://logs/"], [blob])` → stdout `gs://logs/big.log:2\n`, `len(blob.stream.read_sizes) > 2`, cada tamaño en `(0, 65536]`, exit 0
 

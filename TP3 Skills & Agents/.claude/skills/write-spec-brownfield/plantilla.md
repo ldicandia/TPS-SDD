@@ -45,7 +45,9 @@
 
 ### NFR-1 · <atributo medible>
 
-<Métrica, umbral y carga con números. Si no hay NFR, borrá esta sección.>
+- **Métrica** <qué se mide y cómo; si no hay NFR, borrá esta sección completa>
+- **Umbral** <límite numérico con unidad o condición de aceptación>
+- **Carga** <cantidad y tamaño de los datos o concurrencia, con números y unidades>
 
 - **VC-NFR-1** · `<cómo se mide>` → <umbral>
 

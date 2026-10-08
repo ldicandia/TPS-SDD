@@ -59,4 +59,5 @@
 
 ## Trazabilidad
 
-<Pegá acá la tabla que imprime check_spec.py cuando la spec pasa.>
+<Pegá acá la tabla que imprime check_spec.py cuando la spec pasa. Esta sección es
+obligatoria: sin ella el checker falla.>

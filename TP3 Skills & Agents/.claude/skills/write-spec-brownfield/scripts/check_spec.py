@@ -15,16 +15,20 @@ import sys
 
 REQ = re.compile(r"^### ((?:FR|NFR|INV)-[\w]+)\b")
 VC = re.compile(r"^- \*\*VC-((?:FR|NFR|INV)-\w+?)(?:\.\d+)?\*\*")
-ANCLA = re.compile(r"[\w./-]+\.\w+:\d+")
+# La extensión tiene que empezar con letra: si no, "la consigna RFC 2616 sección
+# 3.1:20" contaría como fundamento archivo:línea, que es justo lo que se rechaza.
+ANCLA = re.compile(r"[\w./-]+\.[A-Za-z]\w*:\d+")
 BASE = re.compile(r"^\*\*Base:\*\*.*@\s*`?[0-9a-f]{7,40}`?")
 # TBD/TODO solo en mayúsculas: "todo" es una palabra común en castellano.
 ABIERTO = re.compile(r"\b(TBD|TODO|(?i:a definir|por definir|a confirmar))\b|\?\?")
-FUTURO = re.compile(r"\b(v2|en el futuro|más adelante|eventualmente|próxima iteración)\b", re.I)
+# Mismo criterio que ABIERTO: se evalúa fuera de los backticks y sin `re.I` sobre
+# "v2", porque `/storage/v2/objects` o `--api-version=v2` no son alcance futuro.
+FUTURO = re.compile(r"\b(?:en|para|desde) v\d+\b|\b(en el futuro|más adelante|eventualmente|próxima iteración)\b", re.I)
 PLACEHOLDER = re.compile(r"<[^<>\n]{3,}>")
 # Los <placeholders> literales de la plantilla se detectan aunque queden dentro de backticks.
 PLANTILLA = set(PLACEHOLDER.findall((pathlib.Path(__file__).parent.parent / "plantilla.md").read_text(encoding="utf-8")))
-SECCIONES = ["Propósito", "Alcance", "Invariantes", "Requerimientos", "Decisiones"]
-REFERENCIA = re.compile(r"[\w./-]+\.\w+:\d+(?:-\d+)?")
+SECCIONES = ["Propósito", "Alcance", "Invariantes", "Requerimientos", "Decisiones", "Trazabilidad"]
+REFERENCIA = re.compile(r"[\w./-]+\.[A-Za-z]\w*:\d+(?:-\d+)?")
 
 
 def tiene_contenido(texto):
@@ -95,7 +99,10 @@ def check(path, content=None):
         sin_codigo = re.sub(r"`[^`]*`", "", l)
         if ABIERTO.search(sin_codigo):
             err(n, f"decisión abierta ('{ABIERTO.search(sin_codigo).group(0)}') — cerrala o sacala del alcance")
-        resto = [p for p in PLACEHOLDER.findall(l) if p in PLANTILLA] or PLACEHOLDER.findall(sin_codigo)
+        # Fuera de la plantilla, solo cuenta como placeholder lo que tiene espacios:
+        # <stdin>, <application/json> o <alguien@itba.edu.ar> son datos, no huecos.
+        resto = ([p for p in PLACEHOLDER.findall(l) if p in PLANTILLA]
+                 or [p for p in PLACEHOLDER.findall(sin_codigo) if " " in p])
         if resto:
             err(n, f"placeholder sin completar '{resto[0]}'")
 
@@ -153,8 +160,9 @@ def check(path, content=None):
                                 or not re.search(r"[^\W\d_]|%", medida)):
                     err(i, f"{rid} con **{palabra}** sin medida numérica contextualizada — indicá cantidad y unidad/condición; las anclas no cuentan")
         for i in cuerpo:
-            if FUTURO.search(lines[i - 1]):
-                err(i, f"alcance futuro ('{FUTURO.search(lines[i - 1]).group(0)}') dentro de un requerimiento — va al plan")
+            futuro = FUTURO.search(re.sub(r"`[^`]*`", "", lines[i - 1]))
+            if futuro:
+                err(i, f"alcance futuro ('{futuro.group(0)}') dentro de un requerimiento — va al plan")
     if not any(r.startswith("FR-") for r in ids):
         err(h2.get("Requerimientos", 1), "no hay ningún '### FR-N · …'")
     if not any(r.startswith("INV-") for r in ids):

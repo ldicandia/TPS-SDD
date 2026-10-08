@@ -7,12 +7,15 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fixtures import SPEC_VALIDA as VALID  # noqa: E402
+
 PROJECT = Path(__file__).resolve().parents[2]
-VALID = (PROJECT / "tarea/evidencia/specs/gcsgrep-count.md").read_text(encoding="utf-8")
 INVALID = "\n".join(
     line for line in VALID.splitlines() if not line.startswith("- **VC-FR-1**")
 ) + "\n"
@@ -270,6 +273,50 @@ class SpecGateIndexTests(unittest.TestCase):
         code, error = self.gate('git -C "ruta sin cierre commit')
         self.assertEqual(code, 2, error)
         self.assertIn("commit bloqueado", error)
+
+    def test_unparseable_commands_without_commit_are_not_blocked(self):
+        """Un comando raro que no es commit no tiene por qué frenar la sesión."""
+        self.stage_invalid()
+        for command in (r"echo $'don\'t panic'", "awk '{print $1}' archivo", "echo ok"):
+            with self.subTest(command=command):
+                self.assertEqual(self.gate(command), (0, ""))
+
+    def test_wrapped_commits_are_rejected(self):
+        """Prefijos como time/sudo no convierten un commit en otro comando."""
+        self.stage_invalid()
+        for command in (
+            "time git commit -m prueba", "sudo git commit -m prueba",
+            "nohup git commit -m prueba", "nice -n 5 git commit -m prueba",
+            "stdbuf -o0 git commit -m prueba", "timeout 5 git commit -m prueba",
+            "sudo -u alguien git commit -m prueba",
+        ):
+            with self.subTest(command=command):
+                code, error = self.gate(command)
+                self.assertEqual(code, 2, error)
+                self.assertIn("commit con wrapper", error)
+
+    def test_wrappers_without_a_commit_still_pass(self):
+        self.stage_invalid()
+        for command in ("time pytest -q", "sudo git status", "nohup ls"):
+            with self.subTest(command=command):
+                self.assertEqual(self.gate(command), (0, ""))
+
+    def test_specs_in_subdirectories_are_validated(self):
+        """specs/<subcarpeta>/x.md sigue siendo una spec: el gate la mira."""
+        anidada = self.project / "specs/2026-10/anidada.md"
+        anidada.parent.mkdir(parents=True)
+        anidada.write_text(INVALID, encoding="utf-8")
+        self.git("add", "specs/2026-10/anidada.md")
+        code, error = self.gate()
+        self.assertEqual(code, 2, error)
+        self.assertIn("specs/2026-10/anidada.md:", error)
+
+    def test_markdown_outside_specs_is_still_ignored(self):
+        fuera = self.project / "docs/notas.md"
+        fuera.parent.mkdir()
+        fuera.write_text(INVALID, encoding="utf-8")
+        self.git("add", "docs/notas.md")
+        self.assertEqual(self.gate(), (0, ""))
 
 
 if __name__ == "__main__":

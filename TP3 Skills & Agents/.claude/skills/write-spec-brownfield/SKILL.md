@@ -18,8 +18,9 @@ consigna y no en el código, alcance futuro mezclado con el de ahora.
    encontrás, no lo inventes: ponelo en "Fuera" o preguntá.
 3. **Copiá la plantilla.** Copiá [plantilla.md](plantilla.md) a `specs/<slug>.md` dentro
    del proyecto abierto, donde corre el hook (o en la ruta que pida el usuario, siempre
-   en una carpeta `specs/` del proyecto abierto). Las rutas al código que cambia van
-   relativas a ese proyecto o declaradas al principio de la spec.
+   bajo una carpeta `specs/` del proyecto abierto; las subcarpetas también se validan).
+   Las rutas al código que cambia van relativas a ese proyecto o declaradas al
+   principio de la spec.
 4. **Alcance dentro/fuera.** "Dentro": cada fila nombra el archivo entre backticks y qué
    cambia. "Fuera": cada fila con su porqué. *(Alcance acotado.)*
 5. **Invariantes.** Lo que hoy funciona y no se puede romper — como mínimo, que la
@@ -39,9 +40,10 @@ consigna y no en el código, alcance futuro mezclado con el de ahora.
 8. **Chequeá.** Corré
    `python3 .claude/skills/write-spec-brownfield/scripts/check_spec.py specs/<slug>.md`
    (en Windows, `py -3` en vez de `python3`). Corregí cada línea que reporte y repetí
-   hasta exit 0. Pegá en "## Trazabilidad" la tabla que imprime. Es una validación
-   estructural: no ejecuta VCs ni comprueba la veracidad de los datos, resultados
-   o anclas; el paso 9 revisa su coherencia con el código.
+   hasta exit 0. Pegá en "## Trazabilidad" la tabla que imprime: esa sección es
+   obligatoria y el checker la exige. Es una validación estructural: no ejecuta VCs
+   ni comprueba la veracidad de los datos, resultados o anclas; el paso 9 revisa su
+   coherencia con el código.
 9. **Revisión independiente.** Lanzá el subagent `spec-reviewer` con la ruta de la
    spec. Comprobá que el informe incluya C1–C5, sus estados y evidencia. Solo aceptá
    `READY` con los cinco controles `OK` y ningún `BLOQUEANTE`; si falta un control o

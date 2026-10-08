@@ -3,8 +3,10 @@
 # que el commit puede llevar no pasa check_spec.py: índice y copia de trabajo.
 cd "${CLAUDE_PROJECT_DIR:-.}" || { echo "spec-gate: no pude entrar a CLAUDE_PROJECT_DIR; bloqueo el commit." >&2; exit 2; }
 CHECK=.claude/skills/write-spec-brownfield/scripts/check_spec.py
-PY=""; for c in python3 python "py -3"; do $c -c 'import sys' >/dev/null 2>&1 && { PY=$c; break; }; done
-[ -n "$PY" ] || { echo "spec-gate: no encontré Python 3 (python3, python o py). Instalalo: sin él no puedo chequear las specs y bloqueo el commit." >&2; exit 2; }
+# El probe exige 3.8: en máquinas donde `python` es 2.7, `import sys` pasa igual y
+# después el checker muere con un SyntaxError ilegible.
+PY=""; for c in python3 python "py -3"; do $c -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1 && { PY=$c; break; }; done
+[ -n "$PY" ] || { echo "spec-gate: no encontré Python >= 3.8 (probé python3, python y py -3). Instalalo: sin él no puedo chequear las specs y bloqueo el commit." >&2; exit 2; }
 # Respeta las comillas de -C y veta operaciones previas al commit que cambiarían el índice.
 KIND=$($PY .claude/hooks/commit_command.py) || exit 2
 [ "$KIND" = commit ] || exit 0
@@ -18,7 +20,8 @@ validar() {
   FALLAS+="[$fuente] "$(printf '%s\n' "$OUT" | grep -E '\.md:[0-9]+: ' || printf '%s: check_spec.py falló:\n%s' "$archivo" "$OUT")$'\n'
 }
 while IFS= read -r -d '' f; do
-  printf '%s\n' "$f" | grep -Eq '(^|/)specs/[^/]+\.md$' || continue
+  # .* y no [^/]+: una spec en specs/<subcarpeta>/x.md también es una spec.
+  printf '%s\n' "$f" | grep -Eq '(^|/)specs/.*\.md$' || continue
   for previo in "${FILES[@]}"; do [ "$previo" != "$f" ] || continue 2; done
   FILES+=("$f")
   # git show lee el índice aunque el archivo haya sido corregido o borrado del disco.

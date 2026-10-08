@@ -43,9 +43,17 @@ consigna y no en el código, alcance futuro mezclado con el de ahora.
    estructural: no ejecuta VCs ni comprueba la veracidad de los datos, resultados
    o anclas; el paso 9 revisa su coherencia con el código.
 9. **Revisión independiente.** Lanzá el subagent `spec-reviewer` con la ruta de la
-   spec. Si devuelve `NEEDS WORK`, corregí los hallazgos `BLOQUEANTE`, volvé al paso 8
-   y relanzalo (máximo dos vueltas; si sigue, reportá lo pendiente). *(Gate independiente.)*
-10. **Terminá.** Listo cuando `check_spec.py` sale 0 y `spec-reviewer` dice `READY`.
+   spec. Comprobá que el informe incluya C1–C5, sus estados y evidencia. Solo aceptá
+   `READY` con los cinco controles `OK` y ningún `BLOQUEANTE`; si falta un control o
+   el veredicto contradice el informe, pedí una revisión completa y consistente.
+   Con `NEEDS WORK`, corregí los hallazgos `BLOQUEANTE` o completá la información
+   `NO VERIFICABLE`; no inventes datos o anclas para obtener `READY`. Volvé al paso 8
+   y relanzalo. Máximo dos vueltas de corrección/revisión, incluyendo las motivadas
+   por informes incompletos o inconsistentes; si sigue, reportá lo pendiente.
+   *(Gate independiente.)*
+10. **Terminá.** Listo cuando `check_spec.py` sale 0 y la revisión cumple el criterio
+    de `READY` del paso 9. Si se agotan las vueltas sin cumplirlo, informá `NEEDS WORK`
+    con los bloqueantes y controles pendientes; no declares lista la spec.
     Respondé con la ruta de la spec, la cantidad de FR/INV/VC y el veredicto. No
     implementes ni commitees: el hook `spec-gate` vuelve a chequear la spec en el commit.
 

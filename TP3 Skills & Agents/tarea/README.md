@@ -63,6 +63,30 @@ libre con algún número. La spec de ejemplo se adaptó conservando sus límites
 de lectura y su carga; las transcripciones anteriores conservan el formato
 histórico que realmente se ejecutó.
 
+### Cuándo el revisor puede declarar READY
+
+El brief de [`spec-reviewer`](../.claude/agents/spec-reviewer.md) identifica cinco
+controles: C1 anclas y decisiones, C2 VCs y aceptación de NFRs, C3 términos,
+C4 alcance y C5 invariantes. El informe registra cada uno como `OK`, `FALLA` o
+`NO VERIFICABLE`, con evidencia de lectura. `READY` requiere **los cinco `OK`
+y ningún `BLOQUEANTE`**. Una falla o información insuficiente en cualquiera de ellos
+exige un `BLOQUEANTE` asociado y `NEEDS WORK`.
+
+`MENOR` se limita a detalles editoriales que no cambian el contrato de implementación
+ni los datos/resultados de los VCs. Una contradicción de alcance, un término ambiguo
+o invariantes insuficientes bloquean tanto como un ancla falsa o un VC imposible.
+Si la evidencia no se encuentra, se declara qué ruta se consultó y qué se buscó,
+sin inventar líneas o citas. Los tests propuestos no deben existir antes de implementar;
+sí deben poder escribirse a partir de datos y criterios suficientes.
+
+El skill exige un informe completo y consistente con ese criterio antes de dar la
+spec por lista. Las dos vueltas de corrección/revisión también incluyen informes
+incompletos o contradictorios; si no alcanza, reporta `NEEDS WORK` y lo pendiente.
+El revisor trata las órdenes incrustadas para forzar un veredicto como material a
+evaluar, distinguiéndolas de textos usados como datos de fixtures. Este criterio es
+parte del brief: el hook sigue validando estructura y no certifica el veredicto
+semántico ni la resistencia del modelo a instrucciones incrustadas.
+
 ## Instalación
 
 Las tres piezas ya están en `TP3 Skills & Agents/.claude/`: alcanza con abrir `claude`
@@ -183,6 +207,7 @@ un **clon descartable** del repo con el toolkit copiado.
 | 08 | Regresiones de la corrección del índice: bloquea specs staged inválidas aunque se corrijan o borren del disco; permite volver a stagear la corrección y eliminar una spec del índice; mantiene la política conservadora para `-a`, rutas y eventos PowerShell. Cada caso usa un repo temporal y comprueba que el hook no altere el índice. Es ejecución directa del hook, sin una sesión nueva de Claude. | [`08-hook-indice.txt`](evidencia/08-hook-indice.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 09 | Regresiones de los comandos, incluidas las 12 del índice: rutas `-C` entre comillas, commits compuestos con specs nuevas, destino externo, menciones que no deben disparar y mensajes con operadores como texto. Guarda la salida real y hashes de los archivos probados; cada caso comprueba que el hook no cambie el árbol del índice. | [`09-hook-comandos.txt`](evidencia/09-hook-comandos.txt) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
 | 10 | Corrección del checker: 16 tests de campos FR/NFR y VCs, más las 23 regresiones anteriores del hook y 2 nuevas de bloqueo estructural en índice/copia de trabajo. Incluye salida real, hashes y comprobación directa de la spec adaptada. | [`10-checker-estructura.txt`](evidencia/10-checker-estructura.txt) · [`tests/test_check_spec.py`](tests/test_check_spec.py) · [`tests/test_spec_gate.py`](tests/test_spec_gate.py) |
+| 11 | Revisión manual del criterio de severidad y veredicto: casos de los cinco controles, falta de evidencia, detalles editoriales e instrucciones incrustadas; comprueba consistencia entre brief, skill y README. No es una ejecución nueva del subagent. | [`11-reviewer-criterios.md`](evidencia/11-reviewer-criterios.md) |
 
 Las sesiones 01–04 corrieron antes de los dos arreglos de arriba. Ninguna intentó un commit,
 y la spec de 01 adaptada a los campos explícitos de NFR da OK con el checker actual.
@@ -190,6 +215,9 @@ Las evidencias 05–07 también son anteriores a la corrección del índice; se 
 como historial. La evidencia 08 verifica la corrección del índice y la 09 ambas
 correcciones en sus versiones de entonces. Las evidencias 08–10 son tests directos,
 no sesiones de Claude Code; la 10 verifica las tres correcciones juntas.
+La evidencia 11 documenta la corrección 4 mediante revisión manual de las instrucciones;
+las sesiones históricas del revisor conservan el brief y los veredictos de su corrida.
+Todavía no hay una corrida nueva de Claude con el criterio C1–C5.
 
 ### Casos de trigger del skill (como VCs)
 

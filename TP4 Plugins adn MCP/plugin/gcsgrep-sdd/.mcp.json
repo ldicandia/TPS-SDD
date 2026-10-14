@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gcs": {
+      "command": "npx",
+      "args": ["-y", "@google-cloud/storage-mcp@0.6.0"]
+    }
+  }
+}

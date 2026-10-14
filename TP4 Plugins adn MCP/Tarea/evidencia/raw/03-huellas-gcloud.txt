@@ -1,0 +1,15 @@
+# Huellas del bucket, leídas por una persona con gcloud (cuenta humana), 2026-10-14T02:04:30Z
+# generation: timestamp en microsegundos asignado al crear el objeto (unos ms antes que creation_time); el server MCP 0.6.0 solo expone creation_time (time_created).
++---------------------------------+------------------+--------------------------+------+--------------------------+--------------------------+
+|               NAME              |    GENERATION    |      CREATION_TIME       | SIZE |       CONTENT_TYPE       |         MD5_HASH         |
++---------------------------------+------------------+--------------------------+------+--------------------------+--------------------------+
+| archive/old.log.gz              | 1791942298185401 | 2026-10-14T01:44:58+0000 | 81   | application/gzip         | kG0Q9ZRJE67tyEAs/wlpDg== |
+| bin/blob.bin                    | 1791942298573668 | 2026-10-14T01:44:58+0000 | 36   | application/octet-stream | GJ/6r0DNP1Wzo4SaJzbu4A== |
+| edge/empty.log                  | 1791942299306598 | 2026-10-14T01:44:59+0000 | 0    | text/plain               | 1B2M2Y8AsgTpgAmY7PhCfg== |
+| edge/nonl.log                   | 1791942299249823 | 2026-10-14T01:44:59+0000 | 11   | text/plain               | 0Fsc51fVjYzdp6TpobGOaw== |
+| fixtures/hostil/notas.log       | 1791942298536863 | 2026-10-14T01:44:58+0000 | 265  | text/plain               | ETcxgjogkWyjVuw2sPQ+sg== |
+| logs/2026/10/13/deep/worker.log | 1791942299385263 | 2026-10-14T01:44:59+0000 | 171  | text/plain               | DyQyKBadnjz8+i7pSpbO9Q== |
+| logs/app/a.log                  | 1791942299674455 | 2026-10-14T01:44:59+0000 | 97   | text/plain               | 75y5CARa/CcXoUWFBBMvGg== |
+| logs/app/b.log                  | 1791942299285470 | 2026-10-14T01:44:59+0000 | 82   | text/plain               | TeAcb5sl/SiikR/Q++wosw== |
+| logs/app/server.log             | 1791942299203604 | 2026-10-14T01:44:59+0000 | 314  | text/plain               | yN40iBmJSbDiIsXZwfXAgA== |
++---------------------------------+------------------+--------------------------+------+--------------------------+--------------------------+

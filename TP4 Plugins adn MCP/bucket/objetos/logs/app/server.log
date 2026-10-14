@@ -1,0 +1,5 @@
+2026-10-01T09:00:00Z INFO servidor iniciado puerto=8080
+2026-10-01T09:00:02Z INFO conexion aceptada cliente=10.0.0.7
+2026-10-01T09:00:07Z ERROR timeout esperando respuesta de upstream req=a41f
+2026-10-01T09:00:09Z INFO reintento programado req=a41f
+2026-10-01T09:00:15Z WARN Timeout de lectura recuperado req=a41f

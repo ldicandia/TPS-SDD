@@ -1,0 +1,6 @@
+__pycache__/
+# Credenciales: nunca en el repo. ADC vive en %APPDATA%\gcloud o ~/.config/gcloud.
+application_default_credentials.json
+*-key.json
+*.p12
+.env

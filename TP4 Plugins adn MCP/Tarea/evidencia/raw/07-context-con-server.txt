@@ -1,0 +1,206 @@
+## Context Usage
+
+**Model:** claude-opus-5-5  
+**Tokens:** 20k / 1m (2%)
+
+### Estimated usage by category
+
+| Category | Tokens | Percentage |
+|----------|--------|------------|
+| System prompt | 2.4k | 0.2% |
+| System tools | 4.6k | 0.5% |
+| MCP tools (deferred) | 3.2k | 0.3% |
+| System tools (deferred) | 14k | 1.4% |
+| Custom agents | 3.4k | 0.3% |
+| Memory files | 748 | 0.1% |
+| Skills | 8.9k | 0.9% |
+| Messages | 10 | 0.0% |
+| Free space | 947k | 94.7% |
+| Autocompact buffer | 33k | 3.3% |
+
+### MCP Tools
+
+| Tool | Server | Tokens |
+|------|--------|--------|
+| mcp__gcs__check_iam_permissions | gcs | 165 |
+| mcp__gcs__copy_object_safe | gcs | 279 |
+| mcp__gcs__create_bucket | gcs | 348 |
+| mcp__gcs__execute_insights_query | gcs | 236 |
+| mcp__gcs__get_bucket_location | gcs | 123 |
+| mcp__gcs__get_bucket_metadata | gcs | 123 |
+| mcp__gcs__get_metadata_table_schema | gcs | 273 |
+| mcp__gcs__list_buckets | gcs | 111 |
+| mcp__gcs__list_insights_configs | gcs | 142 |
+| mcp__gcs__list_objects | gcs | 489 |
+| mcp__gcs__read_object_content | gcs | 154 |
+| mcp__gcs__read_object_metadata | gcs | 153 |
+| mcp__gcs__upload_object_safe | gcs | 249 |
+| mcp__gcs__view_iam_policy | gcs | 119 |
+| mcp__gcs__write_object_safe | gcs | 239 |
+
+### Custom Agents
+
+| Agent Type | Source | Tokens |
+|------------|--------|--------|
+| gsd-advisor-researcher | User | 61 |
+| gsd-ai-researcher | User | 134 |
+| gsd-assumptions-analyzer | User | 68 |
+| gsd-code-fixer | User | 80 |
+| gsd-code-reviewer | User | 75 |
+| gsd-codebase-mapper | User | 84 |
+| gsd-debug-session-manager | User | 124 |
+| gsd-debugger | User | 62 |
+| gsd-doc-classifier | User | 114 |
+| gsd-doc-synthesizer | User | 147 |
+| gsd-doc-verifier | User | 50 |
+| gsd-doc-writer | User | 63 |
+| gsd-dom-verifier | User | 102 |
+| gsd-domain-researcher | User | 132 |
+| gsd-eval-auditor | User | 148 |
+| gsd-eval-planner | User | 145 |
+| gsd-executor | User | 71 |
+| gsd-framework-selector | User | 100 |
+| gsd-integration-checker | User | 58 |
+| gsd-intel-updater | User | 42 |
+| gsd-mempalace-curator | User | 106 |
+| gsd-nyquist-auditor | User | 51 |
+| gsd-pattern-mapper | User | 89 |
+| gsd-phase-researcher | User | 75 |
+| gsd-plan-checker | User | 71 |
+| gsd-planner | User | 67 |
+| gsd-project-researcher | User | 88 |
+| gsd-research-synthesizer | User | 73 |
+| gsd-roadmapper | User | 75 |
+| gsd-security-auditor | User | 93 |
+| gsd-ui-auditor | User | 78 |
+| gsd-ui-checker | User | 87 |
+| gsd-ui-researcher | User | 88 |
+| gsd-user-profiler | User | 76 |
+| gsd-verifier | User | 74 |
+| lector-bucket | Project | 173 |
+| spec-reviewer | Project | 183 |
+
+### Memory Files
+
+| Type | Path | Tokens |
+|------|------|--------|
+| User | C:\Users\Lucas Di Candia\.claude\CLAUDE.md | 96 |
+| Project | C:\Users\Lucas Di Candia\Desktop\SDD\TPS-SDD\TP4 Plugins adn MCP\CLAUDE.md | 652 |
+
+### Skills
+
+| Skill | Source | Tokens |
+|-------|--------|--------|
+| graphify | User | ~120 |
+| gsd-add-tests | User | ~30 |
+| gsd-ai-integration-phase | User | ~40 |
+| gsd-audit-fix | User | ~30 |
+| gsd-audit-milestone | User | ~30 |
+| gsd-audit-uat | User | ~30 |
+| gsd-autonomous | User | ~30 |
+| gsd-capture | User | ~30 |
+| gsd-cleanup | User | ~30 |
+| gsd-code-review | User | ~40 |
+| gsd-complete-milestone | User | ~30 |
+| gsd-config | User | ~40 |
+| gsd-debug | User | ~30 |
+| gsd-discuss-phase | User | ~30 |
+| gsd-docs-update | User | ~30 |
+| gsd-eval-review | User | ~40 |
+| gsd-execute-phase | User | ~40 |
+| gsd-explore | User | ~30 |
+| gsd-extract-learnings | User | ~40 |
+| gsd-fast | User | ~30 |
+| gsd-forensics | User | ~30 |
+| gsd-graphify | User | ~30 |
+| gsd-health | User | ~30 |
+| gsd-help | User | < 20 |
+| gsd-import | User | ~40 |
+| gsd-inbox | User | ~40 |
+| gsd-ingest-docs | User | ~40 |
+| gsd-manager | User | ~30 |
+| gsd-map-codebase | User | ~40 |
+| gsd-mempalace-capture | User | ~40 |
+| gsd-mempalace-recall | User | ~30 |
+| gsd-milestone-summary | User | ~40 |
+| gsd-mvp-phase | User | ~30 |
+| gsd-new-milestone | User | ~30 |
+| gsd-new-project | User | ~30 |
+| gsd-next | User | ~30 |
+| gsd-ns-context | User | ~20 |
+| gsd-ns-ideate | User | ~20 |
+| gsd-ns-manage | User | ~20 |
+| gsd-ns-project | User | ~20 |
+| gsd-ns-review | User | ~20 |
+| gsd-ns-workflow | User | ~20 |
+| gsd-onboard | User | ~30 |
+| gsd-pause-work | User | ~20 |
+| gsd-phase | User | ~40 |
+| gsd-plan-phase | User | ~30 |
+| gsd-plan-review-convergence | User | ~30 |
+| gsd-pr-branch | User | ~30 |
+| gsd-profile-user | User | ~30 |
+| gsd-progress | User | ~40 |
+| gsd-quick | User | ~40 |
+| gsd-quick-batch | User | ~40 |
+| gsd-resume-work | User | ~30 |
+| gsd-review | User | ~30 |
+| gsd-review-backlog | User | ~30 |
+| gsd-secure-phase | User | ~30 |
+| gsd-settings | User | ~20 |
+| gsd-ship | User | ~30 |
+| gsd-sketch | User | ~40 |
+| gsd-spec-phase | User | ~40 |
+| gsd-spike | User | ~40 |
+| gsd-stats | User | ~30 |
+| gsd-surface | User | ~40 |
+| gsd-thread | User | ~20 |
+| gsd-ui-phase | User | ~30 |
+| gsd-ui-review | User | ~30 |
+| gsd-ultraplan-phase | User | ~40 |
+| gsd-undo | User | ~40 |
+| gsd-update | User | ~20 |
+| gsd-validate-phase | User | ~30 |
+| gsd-verify-work | User | ~20 |
+| gsd-workspace | User | ~30 |
+| gsd-workstreams | User | ~40 |
+| write-spec-brownfield | Project | ~230 |
+| write-vcs-con-bucket | Project | ~180 |
+| mattpocock-skills:diagnosing-bugs | Plugin (mattpocock-skills) | ~60 |
+| mattpocock-skills:tdd | Plugin (mattpocock-skills) | ~60 |
+| mattpocock-skills:prototype | Plugin (mattpocock-skills) | ~70 |
+| mattpocock-skills:research | Plugin (mattpocock-skills) | ~90 |
+| mattpocock-skills:domain-modeling | Plugin (mattpocock-skills) | ~60 |
+| mattpocock-skills:codebase-design | Plugin (mattpocock-skills) | ~100 |
+| mattpocock-skills:code-review | Plugin (mattpocock-skills) | ~150 |
+| mattpocock-skills:resolving-merge-conflicts | Plugin (mattpocock-skills) | ~40 |
+| mattpocock-skills:wizard | Plugin (mattpocock-skills) | ~110 |
+| mattpocock-skills:grilling | Plugin (mattpocock-skills) | ~60 |
+| mattpocock-skills:writing-for-agents | Plugin (mattpocock-skills) | ~50 |
+| dataviz | Built-in | ~480 |
+| update-config | Built-in | ~240 |
+| keybindings-help | Built-in | ~80 |
+| code-review | Built-in | ~330 |
+| simplify | Built-in | ~60 |
+| fewer-permission-prompts | Built-in | ~60 |
+| loop | Built-in | ~120 |
+| schedule | Built-in | ~130 |
+| claude-api | Built-in | ~360 |
+| run | Built-in | ~120 |
+| plugin-authoring | Built-in | ~90 |
+| init | Built-in | ~20 |
+| security-review | Built-in | ~30 |
+| built-in-browser | claude.ai sync | ~290 |
+| chrome-browser | claude.ai sync | ~260 |
+| computer-use | claude.ai sync | ~320 |
+| deep-research | claude.ai sync | ~200 |
+| docs | claude.ai sync | ~340 |
+| docx | claude.ai sync | ~320 |
+| google-workspace | claude.ai sync | ~330 |
+| import-memory | claude.ai sync | ~60 |
+| morning | claude.ai sync | ~120 |
+| pdf | claude.ai sync | ~150 |
+| pptx | claude.ai sync | ~330 |
+| skill-creator | claude.ai sync | ~120 |
+| xlsx | claude.ai sync | ~320 |
+

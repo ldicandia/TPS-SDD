@@ -1,0 +1,17 @@
+{
+  "name": "gcsgrep-sdd",
+  "version": "1.0.0",
+  "description": "Toolkit SDD de gcsgrep: specs brownfield con VCs leídos de un bucket de GCS real por MCP (solo lectura), revisor independiente, gate de commits y allowlist sobre las tools del server.",
+  "author": { "name": "Lucas Di Candia, Timoteo Feeney, Matias Sapino" },
+  "license": "MIT",
+  "keywords": ["sdd", "spec", "mcp", "gcs", "gcsgrep"],
+  "userConfig": {
+    "bucket": {
+      "type": "string",
+      "title": "Bucket de prueba de gcsgrep",
+      "description": "Solo el nombre, sin gs:// (por ejemplo, mi-proyecto-gcsgrep-tp4). Un bucket de prueba con objetos sintéticos; el hook veta cualquier otro.",
+      "required": true,
+      "sensitive": false
+    }
+  }
+}

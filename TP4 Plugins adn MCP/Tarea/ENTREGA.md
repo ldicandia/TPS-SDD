@@ -30,6 +30,10 @@ seguridad: [`README.md`](README.md).
 - Service account: `gcsgrep-mcp-lector@spec-driven-511601.iam.gserviceaccount.com`,
   `roles/storage.objectViewer` sobre el bucket.
 - Server: `@google-cloud/storage-mcp@0.6.0`, sin `--enable-destructive-tools`.
+- Actualización local: plugin `1.0.1`, loader `generation-v1` en [`mcp/`](../mcp/).
+  El skill y el lector ahora guardan y comparan la generation real. Las corridas
+  contra GCS 01–07 son históricas; los tests Node y Python verifican el ajuste local.
+  Pendiente: una nueva corrida contra el bucket real con esta versión.
 - Claude Code 2.1.296, Windows 11, Node 24, Python 3.14.
 
 ## Cómo verificar
@@ -38,6 +42,7 @@ Sin GCP, desde `TP4 Plugins adn MCP/`:
 
 ```bash
 py -3 -m unittest discover -s Tarea/tests -v      # 12 tests del hook
+node --test mcp/generation-loader.test.mjs      # ajuste generation
 claude plugin validate plugin/gcsgrep-sdd          # ✔ Validation passed
 ```
 

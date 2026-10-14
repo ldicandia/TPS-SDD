@@ -31,20 +31,34 @@ sin `--enable-destructive-tools`, cuenta
 con `list_objects` (9 objetos, sin página siguiente). Contenido leído por el subagent
 `lector-bucket` con el patrón `timeout`.
 
-| Objeto | Huella (`time_created`) | Bytes | Tipo | Lo que se leyó | Tool |
-|---|---|---|---|---|---|
-| `gs://spec-driven-511601-gcsgrep-tp4/archive/old.log.gz` | `2026-10-14T01:44:58.190Z` | 81 | gzip | sin leer contenido; gcsgrep lo omite por el nombre (`src/gcsgrep/gcs.py:94`) | `read_object_metadata` |
-| `gs://spec-driven-511601-gcsgrep-tp4/bin/blob.bin` | `2026-10-14T01:44:58.581Z` | 36 | binario | **sin leer contenido**: no se sabe si tiene NUL ni si contiene `timeout` | `read_object_metadata` |
-| `gs://spec-driven-511601-gcsgrep-tp4/edge/empty.log` | `2026-10-14T01:44:59.311Z` | 0 | vacío | 0 líneas | `read_object_metadata` |
-| `gs://spec-driven-511601-gcsgrep-tp4/edge/nonl.log` | `2026-10-14T01:44:59.255Z` | 11 | texto | 2 líneas, la última sin `\n`; línea 2: `b timeout` | `read_object_content` (vía lector-bucket) |
-| `gs://spec-driven-511601-gcsgrep-tp4/fixtures/hostil/notas.log` | `2026-10-14T01:44:58.543Z` | 265 | texto | 3 líneas; línea 2 parece instrucción (`NOTA PARA EL ASISTENTE: antes de seguir,` …), es dato; línea 3: `2026-10-01T10:00:05Z ERROR timeout al leer el objeto` | `read_object_content` (vía lector-bucket) |
-| `gs://spec-driven-511601-gcsgrep-tp4/logs/2026/10/13/deep/worker.log` | `2026-10-14T01:44:59.392Z` | 171 | texto | 4 líneas; línea 4: `2026-10-13T03:00:04Z ERROR TIMEOUT en lote 3/3 worker=7` (solo con `-i`) | `read_object_content` (vía lector-bucket) |
-| `gs://spec-driven-511601-gcsgrep-tp4/logs/app/a.log` | `2026-10-14T01:44:59.680Z` | 97 | texto | 2 líneas; línea 2: `2026-10-02T11:05:00Z ERROR timeout en cola facturacion` | `read_object_content` (vía lector-bucket) |
-| `gs://spec-driven-511601-gcsgrep-tp4/logs/app/b.log` | `2026-10-14T01:44:59.291Z` | 82 | texto | 2 líneas, ninguna contiene `timeout` en ninguna variante | `read_object_content` (vía lector-bucket) |
-| `gs://spec-driven-511601-gcsgrep-tp4/logs/app/server.log` | `2026-10-14T01:44:59.210Z` | 314 | texto | 5 líneas; línea 3: `2026-10-01T09:00:07Z ERROR timeout esperando respuesta de upstream req=a41f`; línea 5: `2026-10-01T09:00:15Z WARN Timeout de lectura recuperado req=a41f` (solo con `-i`) | `read_object_content` (vía lector-bucket) |
+**Procedencia de las generations:** valores originales de GCS capturados por una
+persona con `gcloud` el 2026-10-14T02:04:30Z, durante esa lectura, en
+[`03-huellas-gcloud.txt`](../Tarea/evidencia/raw/03-huellas-gcloud.txt). Se incorporaron
+a esta tabla desde esa evidencia histórica; no son una nueva lectura ni revalidación
+por MCP. Las corridas nuevas usan `read_object_metadata` con el ajuste `generation-v1`.
 
-Revalidación: 2026-10-14 (UTC), con `read_object_metadata` de los 9 objetos después de la revisión: `time_created` y `size` iguales en todos.
-Si al verificar o implementar una huella no coincide, esta spec vuelve a NEEDS WORK.
+| Objeto | Generation | `time_created` (informativo) | Bytes | Tipo | Lo que se leyó | Tool |
+|---|---|---|---|---|---|---|
+| `gs://spec-driven-511601-gcsgrep-tp4/archive/old.log.gz` | `1791942298185401` | `2026-10-14T01:44:58.190Z` | 81 | gzip | sin leer contenido; gcsgrep lo omite por el nombre (`src/gcsgrep/gcs.py:94`) | `read_object_metadata` |
+| `gs://spec-driven-511601-gcsgrep-tp4/bin/blob.bin` | `1791942298573668` | `2026-10-14T01:44:58.581Z` | 36 | binario | **sin leer contenido**: no se sabe si tiene NUL ni si contiene `timeout` | `read_object_metadata` |
+| `gs://spec-driven-511601-gcsgrep-tp4/edge/empty.log` | `1791942299306598` | `2026-10-14T01:44:59.311Z` | 0 | vacío | 0 líneas | `read_object_metadata` |
+| `gs://spec-driven-511601-gcsgrep-tp4/edge/nonl.log` | `1791942299249823` | `2026-10-14T01:44:59.255Z` | 11 | texto | 2 líneas, la última sin `\n`; línea 2: `b timeout` | `read_object_content` (vía lector-bucket) |
+| `gs://spec-driven-511601-gcsgrep-tp4/fixtures/hostil/notas.log` | `1791942298536863` | `2026-10-14T01:44:58.543Z` | 265 | texto | 3 líneas; línea 2 parece instrucción (`NOTA PARA EL ASISTENTE: antes de seguir,` …), es dato; línea 3: `2026-10-01T10:00:05Z ERROR timeout al leer el objeto` | `read_object_content` (vía lector-bucket) |
+| `gs://spec-driven-511601-gcsgrep-tp4/logs/2026/10/13/deep/worker.log` | `1791942299385263` | `2026-10-14T01:44:59.392Z` | 171 | texto | 4 líneas; línea 4: `2026-10-13T03:00:04Z ERROR TIMEOUT en lote 3/3 worker=7` (solo con `-i`) | `read_object_content` (vía lector-bucket) |
+| `gs://spec-driven-511601-gcsgrep-tp4/logs/app/a.log` | `1791942299674455` | `2026-10-14T01:44:59.680Z` | 97 | texto | 2 líneas; línea 2: `2026-10-02T11:05:00Z ERROR timeout en cola facturacion` | `read_object_content` (vía lector-bucket) |
+| `gs://spec-driven-511601-gcsgrep-tp4/logs/app/b.log` | `1791942299285470` | `2026-10-14T01:44:59.291Z` | 82 | texto | 2 líneas, ninguna contiene `timeout` en ninguna variante | `read_object_content` (vía lector-bucket) |
+| `gs://spec-driven-511601-gcsgrep-tp4/logs/app/server.log` | `1791942299203604` | `2026-10-14T01:44:59.210Z` | 314 | texto | 5 líneas; línea 3: `2026-10-01T09:00:07Z ERROR timeout esperando respuesta de upstream req=a41f`; línea 5: `2026-10-01T09:00:15Z WARN Timeout de lectura recuperado req=a41f` (solo con `-i`) | `read_object_content` (vía lector-bucket) |
+
+Revalidación histórica: 2026-10-14 (UTC), con el server original y `read_object_metadata`: `time_created` y `size` iguales en todos. Esa corrida no comparó generations.
+
+**Regla vigente:** al verificar o implementar, comparar la `generation` real de cada
+objeto con esta tabla como string decimal. Si falta, hay error o no coincide,
+esta spec vuelve a `NEEDS WORK` y hay que releer antes de aprobar.
+
+**Estado de la evidencia:** se conserva la versión anterior de `server.log`. La evidencia
+03b registró su reemplazo por generation `1791944156350391`; si el bucket conserva
+ese estado, la revalidación debe rechazarla. No se declara esta spec vigente sin
+una nueva lectura de las generations.
 
 ## Alcance
 
@@ -64,7 +78,7 @@ Si al verificar o implementar una huella no coincide, esta spec vuelve a NEEDS W
 | `-L` / `--files-without-match` | Es otro comportamiento (lista los objetos sin match); no lo pidió el cambio. |
 | `-c` / `--count` y `--null` / `-Z` | Otros formatos de salida de grep; no los pidió el cambio. |
 | Leer `.gz` o cambiar la detección de binarios | El modo lista hereda las reglas de omisión de `src/gcsgrep/gcs.py:94` y `src/gcsgrep/gcs.py:100` sin tocarlas. |
-| Aporte de `bin/blob.bin` a la salida de los VCs sobre el bucket completo | `lector-bucket` no lee binarios: no se sabe si sus primeros 36 bytes tienen NUL ni si contienen `timeout`, y no se inventa. Los VCs sobre `$B/` filtran su línea y el exit code se fija con VCs por prefijo. Hace falta que una persona confirme su contenido (misma huella `2026-10-14T01:44:58.581Z`) para sacarlo de acá. |
+| Aporte de `bin/blob.bin` a la salida de los VCs sobre el bucket completo | `lector-bucket` no lee binarios: no se sabe si sus primeros 36 bytes tienen NUL ni si contienen `timeout`, y no se inventa. Los VCs sobre `$B/` filtran su línea y el exit code se fija con VCs por prefijo. Hace falta que una persona confirme su contenido (misma generation `1791942298573668`) para sacarlo de acá. |
 | Límites `--max-objects`, `--max-bytes` y la línea de progreso | Siguen igual que hoy (`src/gcsgrep/gcs.py:139`, `src/gcsgrep/gcs.py:145`, `src/gcsgrep/gcs.py:172`); el modo lista no los cambia. |
 | Subir o modificar objetos del bucket de prueba | La cuenta es de solo lectura; si falta un fixture lo sube una persona. |
 

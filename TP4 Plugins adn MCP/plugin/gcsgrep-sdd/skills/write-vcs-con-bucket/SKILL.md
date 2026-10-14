@@ -17,11 +17,13 @@ El server MCP `gcs` (`@google-cloud/storage-mcp@0.6.0`, sin `--enable-destructiv
 conectado con la cuenta de solo lectura, y la opción `bucket` del plugin (o `GCSGREP_BUCKET`) con el nombre
 del bucket de prueba. Si las tools no aparecen, **el bug es la config**, no el skill.
 
-**La huella.** El server 0.6.0 no expone `generation` ni `md5Hash` en
-`read_object_metadata`. Expone `time_created`, que en GCS es el instante en que se creó
-**esa generation** (GCS asigna la generation en el mismo momento): si alguien
-reemplaza el objeto, cambia. La huella de cada objeto es `time_created` + `size`.
-`updated` no sirve: cambia también cuando solo se toca la metadata.
+**La versión.** La config carga el ajuste local `generation-v1` de `mcp/`, que agrega
+`generation` a `read_object_metadata` usando el campo original de la consulta GCS.
+El paquete oficial 0.6.0 lo omite al formatear la respuesta. Guardá el valor como
+**string decimal**, sin convertirlo a Number ni deducirlo de una fecha.
+`time_created`, `size` y `updated` son información adicional: **no sustituyen generation**.
+Si falta `generation`, es inválida o una spec vieja no la registró, frená con
+`NEEDS WORK`: hace falta releer y registrar la versión antes de aprobar.
 
 ## Pasos
 
@@ -48,7 +50,8 @@ reemplaza el objeto, cambia. La huella de cada objeto es `time_created` + `size`
 6. **Chequeá y revisá**: pasos 8 y 9 de `write-spec-brownfield` (`check_spec.py` hasta
    exit 0, luego `spec-reviewer`, máximo dos vueltas).
 7. **Revalidá antes de declarar la spec lista.** Pedí `read_object_metadata` de cada
-   objeto de la tabla y compará la huella (`time_created` y `size`). Si alguna cambió, la evidencia envejeció:
+   objeto de la tabla y compará su `generation` como string con la registrada.
+   Si falta, hay un error de lectura, desapareció el objeto o alguna cambió, la evidencia envejeció:
    la spec queda en `NEEDS WORK`, se vuelve al paso 4 y se reescriben los VCs afectados.
    No se aprueba contra un objeto que ya no es el que se leyó. Lo mismo vale si después
    alguien pide verificar o implementar contra esta spec: primero se revalida.
@@ -64,12 +67,12 @@ Leído el <fecha ISO UTC> vía MCP: server `@google-cloud/storage-mcp` 0.6.0 sin
 `--enable-destructive-tools`, cuenta `<service account>` (roles/storage.objectViewer
 sobre `gs://<bucket>`). Contenido leído por el subagent `lector-bucket`.
 
-| Objeto | Huella (`time_created`) | Bytes | Tipo | Lo que se leyó | Tool |
+| Objeto | Generation | Bytes | Tipo | Lo que se leyó | Tool |
 |---|---|---|---|---|---|
-| `gs://<bucket>/logs/app/server.log` | `2026-…T…Z` | 314 | texto | línea 3: `… ERROR timeout …` | `read_object_content` (vía lector-bucket) |
+| `gs://<bucket>/logs/app/server.log` | `<generation decimal devuelta por GCS>` | 314 | texto | línea 3: `… ERROR timeout …` | `read_object_content` (vía lector-bucket) |
 
-Revalidación: <fecha> — huellas iguales / cambió `<objeto>` → spec en NEEDS WORK.
-Si al verificar o implementar una huella no coincide, esta spec vuelve a NEEDS WORK.
+Revalidación: <fecha> — generations iguales / cambió `<objeto>` → spec en NEEDS WORK.
+Si al verificar o implementar una generation falta o no coincide, esta spec vuelve a NEEDS WORK.
 ```
 
 ## Anti-patrones
@@ -84,6 +87,8 @@ Los de `write-spec-brownfield` siguen valiendo, más estos:
   sus primeras palabras, en un VC si sirve.
 - **Evidencia sin huella ni fecha.** Dentro de una semana nadie sabe si el objeto
   sigue siendo el mismo.
+- **Aprobar con fecha y tamaño.** Incluso si coinciden, hace falta una `generation`
+  válida e igual a la registrada; no se calcula a partir de timestamps.
 - **"Arreglar" el bucket.** Si falta un fixture, no lo subas vos (el hook y la cuenta lo
   impiden): pedile a una persona que lo suba y dejalo en "Fuera" mientras tanto.
 - **Inventar la línea.** Si el subagent no la reportó, no existe para esta spec.

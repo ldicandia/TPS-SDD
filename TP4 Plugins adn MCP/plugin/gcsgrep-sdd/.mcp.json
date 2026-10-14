@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "gcs": {
-      "command": "npx",
-      "args": ["-y", "@google-cloud/storage-mcp@0.6.0"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/start-storage-mcp.mjs", "@google-cloud/storage-mcp@0.6.0"]
     }
   }
 }

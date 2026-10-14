@@ -14,7 +14,9 @@ AQUI="$(cd "$(dirname "$0")" && pwd)"
 TK="$AQUI/../../.claude"
 
 rm -rf "$AQUI/skills" "$AQUI/agents"
-mkdir -p "$AQUI/skills" "$AQUI/agents" "$AQUI/hooks"
+mkdir -p "$AQUI/skills" "$AQUI/agents" "$AQUI/hooks" "$AQUI/mcp"
+cp "$AQUI/../../mcp/register-generation.mjs" "$AQUI/../../mcp/generation-loader.mjs" \
+   "$AQUI/../../mcp/start-storage-mcp.mjs" "$AQUI/mcp/"
 cp -R "$TK/skills/write-spec-brownfield" "$TK/skills/write-vcs-con-bucket" "$AQUI/skills/"
 cp "$TK/agents/spec-reviewer.md" "$TK/agents/lector-bucket.md" "$AQUI/agents/"
 cp "$TK/hooks/spec-gate.sh" "$TK/hooks/commit_command.py" \

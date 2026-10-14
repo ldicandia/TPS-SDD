@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "uvx",
+      "args": [
+        "--python", "3.12",
+        "--with", "mcp<2",
+        "postgres-mcp==0.3.0",
+        "--access-mode=restricted"
+      ],
+      "env": {
+        "DATABASE_URI": "${user_config.database_uri}"
+      }
+    }
+  }
+}

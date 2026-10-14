@@ -1,0 +1,17 @@
+{
+  "name": "adr-toolkit",
+  "version": "1.0.0",
+  "description": "Registrar decisiones de arquitectura (ADRs) con evidencia de la base: skills, subagents, hooks y el server MCP de Postgres en modo restringido.",
+  "author": { "name": "73.31 Spec-Driven Development — ITBA" },
+  "license": "MIT",
+  "keywords": ["adr", "mcp", "postgres", "sdd"],
+  "userConfig": {
+    "database_uri": {
+      "type": "string",
+      "title": "URI de la base (rol de solo lectura)",
+      "description": "postgresql://turnos_lector:<contraseña>@127.0.0.1:54329/turnos — el rol de solo lectura, nunca el dueño de la base.",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

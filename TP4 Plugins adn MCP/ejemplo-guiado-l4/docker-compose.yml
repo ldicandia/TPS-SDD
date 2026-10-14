@@ -1,0 +1,19 @@
+# Base local y descartable de turnos-api, con datos sintéticos.
+#
+#   export POSTGRES_PASSWORD=…  LECTOR_PASSWORD=…
+#   docker compose up -d
+#
+# Escucha solo en 127.0.0.1: no queda expuesta a la red.
+# Para empezar de cero: docker compose down -v
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: turnos
+      POSTGRES_USER: turnos_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definí POSTGRES_PASSWORD en tu entorno}
+      LECTOR_PASSWORD: ${LECTOR_PASSWORD:?definí LECTOR_PASSWORD en tu entorno}
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - ./db:/docker-entrypoint-initdb.d:ro

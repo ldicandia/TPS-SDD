@@ -1,0 +1,17 @@
+# EJEMPLO — para Codex: copialo como .codex/config.toml en un proyecto confiado.
+# Es el mismo server que .mcp.json.ejemplo. Codex no expande ${VAR}: env_vars
+# reenvía DATABASE_URI desde tu entorno. Ningún secreto en este archivo.
+
+[mcp_servers.postgres]
+command = "uvx"
+args = ["--python", "3.12", "--with", "mcp<2", "postgres-mcp==0.3.0", "--access-mode=restricted"]
+env_vars = ["DATABASE_URI"]
+
+# Allowlist de tools: lo más cercano, en Codex, al hook postgres-allowlist.sh de Claude
+# Code. Cualquier tool que no esté acá —incluida una nueva de la próxima versión del
+# server— no se expone. A diferencia del hook, no mira los argumentos de execute_sql.
+enabled_tools = ["list_schemas", "list_objects", "get_object_details", "explain_query", "execute_sql"]
+
+# Si el server no arranca, Codex no arranca: el equivalente al paso 1 del skill
+# ("sin la base, frená"). Un agente que sigue sin el server escribe un ADR inventado.
+required = true

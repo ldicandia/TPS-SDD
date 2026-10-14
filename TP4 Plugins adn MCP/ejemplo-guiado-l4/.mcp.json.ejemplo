@@ -1,0 +1,25 @@
+{
+  "_comentario": [
+    "EJEMPLO — copialo a la raíz del repo como .mcp.json. Lo leen Claude Code y Grok Build;",
+    "para Codex, el equivalente es config.toml.ejemplo.",
+    "Se commitea: quien clone recibe el mismo server, sin documento de setup.",
+    "REGLA: ningún secreto acá adentro. DATABASE_URI llega por el entorno.",
+    "Versiones fijadas a propósito: postgres-mcp 0.3.0 no arranca con mcp 2.x,",
+    "y sin fijar, uvx baja la última de cada una cada vez que arranca el server."
+  ],
+
+  "mcpServers": {
+    "postgres": {
+      "command": "uvx",
+      "args": [
+        "--python", "3.12",
+        "--with", "mcp<2",
+        "postgres-mcp==0.3.0",
+        "--access-mode=restricted"
+      ],
+      "env": {
+        "DATABASE_URI": "${DATABASE_URI}"
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+# Lo genera armar.sh a partir de los ejemplos de L3 y L4.
+skills/
+agents/
+hooks/*.sh

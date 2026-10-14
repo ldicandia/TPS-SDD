@@ -1,0 +1,20 @@
+{
+  "_comentario": [
+    "EJEMPLO — fusionalo en .claude/settings.json del repo donde corre el agente,",
+    "junto con los hooks del toolkit de la Lección 3. El script va en .claude/hooks/.",
+    "El matcher toma el nombre completo de la tool MCP: mcp__<server>__<tool>."
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__postgres__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/postgres-allowlist.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
